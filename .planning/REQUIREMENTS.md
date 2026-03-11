@@ -17,7 +17,7 @@ Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap ph
 ### Error Handling
 
 - [x] **ERR-01**: CLI exits 0 for all tests pass, 1 for any test failure, 2 for config/runtime errors (POSIX convention)
-- [ ] **ERR-02**: CLI performs preflight HTTP reachability check on baseUrl before AI execution, exiting 2 with clear message if unreachable
+- [x] **ERR-02**: CLI performs preflight HTTP reachability check on baseUrl before AI execution, exiting 2 with clear message if unreachable
 
 ### Cache
 
@@ -76,7 +76,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ERR-01 | Phase 4 | Complete |
 | CACHE-01 | Phase 4 | Complete |
 | CACHE-02 | Phase 4 | Complete |
-| ERR-02 | Phase 5 | Pending |
+| ERR-02 | Phase 5 | Complete |
 | FLAG-04 | Phase 5 | Complete |
 | FLAG-03 | Phase 5 | Complete |
 | FLAG-01 | Phase 6 | Pending |

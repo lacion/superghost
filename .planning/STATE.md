@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: DX Polish + Reliability Hardening
 status: in-progress
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-03-11T23:32:40.000Z"
-last_activity: 2026-03-12 — Completed plan 05-01 (--only and --no-cache CLI flags)
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-03-11T23:37:58.000Z"
+last_activity: 2026-03-12 — Completed plan 05-02 (preflight baseUrl reachability check)
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -21,30 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-11)
 
 **Core value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
-**Current focus:** Phase 5 — Infrastructure + Flags (--only, --no-cache, preflight)
+**Current focus:** Phase 5 complete — Infrastructure + Flags (--only, --no-cache, preflight)
 
 ## Current Position
 
 Phase: 5 of 7 (Infrastructure + Flags)
-Plan: 1 of 2 complete
-Status: In progress
-Last activity: 2026-03-12 — Completed plan 05-01 (--only and --no-cache CLI flags)
+Plan: 2 of 2 complete
+Status: Phase complete
+Last activity: 2026-03-12 — Completed plan 05-02 (preflight baseUrl reachability check)
 
-Progress: [███████░░░] 75%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3 (v0.2)
+- Total plans completed: 4 (v0.2)
 - Average duration: 3min
-- Total execution time: 10min
+- Total execution time: 12min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 04-foundation | 2/2 | 6min | 3min |
-| 05-infrastructure-flags | 1/2 | 4min | 4min |
+| 05-infrastructure-flags | 2/2 | 6min | 3min |
 
 *Updated after each plan completion*
 
@@ -62,6 +62,8 @@ Full decision log in PROJECT.md Key Decisions table.
 - (05-01) picomatch for glob matching with nocase: true for case-insensitive test name filtering
 - (05-01) Skipped count computed at CLI level, set on RunResult after runner.run() completes
 - (05-01) noCache skips cache reads via conditional guard; cache writes remain unchanged
+- (05-02) Extracted checkBaseUrlReachable into src/infra/preflight.ts for testability
+- (05-02) HEAD method with 5s timeout; any HTTP response = reachable, only network errors trigger exit 2
 
 ### Pending Todos
 
@@ -79,6 +81,6 @@ From research:
 
 ## Session Continuity
 
-Last session: 2026-03-11T23:32:40Z
-Stopped at: Completed 05-01-PLAN.md
-Resume file: .planning/phases/05-infrastructure-flags/05-01-SUMMARY.md
+Last session: 2026-03-11T23:37:58Z
+Stopped at: Completed 05-02-PLAN.md
+Resume file: .planning/phases/05-infrastructure-flags/05-02-SUMMARY.md
