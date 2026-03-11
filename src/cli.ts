@@ -20,6 +20,7 @@ import {
 } from "./agent/model-factory.ts";
 import type { ProviderName } from "./agent/model-factory.ts";
 import { executeAgent } from "./agent/agent-runner.ts";
+import picomatch from "picomatch";
 import { isStandaloneBinary } from "./dist/paths.ts";
 import { ensureMcpDependencies } from "./dist/setup.ts";
 import pkg from "../package.json";
@@ -32,6 +33,7 @@ program
   .version(pkg.version)
   .requiredOption("-c, --config <path>", "Path to YAML config file")
   .option("--headed", "Run browser in headed mode (visible browser window)")
+  .option("--only <pattern>", "Run only tests matching glob pattern")
   .exitOverride((err) => {
     // Commander writes its own error message to stderr.
     // Re-exit with code 2 for config-class errors (missing required option, unknown option).
@@ -39,7 +41,7 @@ program
       process.exit(2);
     }
   })
-  .action(async (options: { config: string; headed?: boolean }) => {
+  .action(async (options: { config: string; headed?: boolean; only?: string; cache: boolean }) => {
     const pm = new ProcessManager();
     setupSignalHandlers(pm);
 
@@ -65,6 +67,24 @@ program
 
       // Validate API key at startup before any tests run
       validateApiKey(provider);
+
+      // Apply --only filter before any expensive operations
+      const totalTestCount = config.tests.length;
+      if (options.only) {
+        const allTestNames = config.tests.map((t) => t.name);
+        const isMatch = picomatch(options.only, { nocase: true });
+        config.tests = config.tests.filter((t) => isMatch(t.name));
+
+        if (config.tests.length === 0) {
+          const names = allTestNames.map((n) => `  - ${n}`).join("\n");
+          await Bun.write(
+            Bun.stderr,
+            `${pc.red("Error:")} No tests match pattern "${options.only}"\n\nAvailable tests:\n${names}\n`,
+          );
+          setTimeout(() => process.exit(2), 100);
+          return;
+        }
+      }
 
       // Create AI model
       const model = createModel(config.model, provider);
@@ -102,12 +122,23 @@ program
       const executeFn: ExecuteFn = async (testCase, baseUrl, testContext?) =>
         executor.execute(testCase, baseUrl, testContext);
 
-      console.log(
-        `\n${pc.bold("superghost")} v${pkg.version} / Running ${config.tests.length} test(s)...\n`,
-      );
+      let header = `\n${pc.bold("superghost")} v${pkg.version} / Running ${config.tests.length}`;
+      if (options.only) {
+        header += ` of ${totalTestCount}`;
+      }
+      header += ` test(s)...\n`;
+      console.log(header);
+
+      if (options.only) {
+        console.log(pc.dim(`  (filtered by --only "${options.only}")`));
+      }
+      if (options.only) {
+        console.log("");
+      }
 
       const runner = new TestRunner(config, reporter, executeFn);
       const result = await runner.run();
+      result.skipped = options.only ? totalTestCount - config.tests.length : 0;
 
       await mcpManager.close();
       await pm.killAll();

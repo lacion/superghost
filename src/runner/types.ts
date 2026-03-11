@@ -23,4 +23,5 @@ export interface RunResult {
   passed: number;
   failed: number;
   cached: number;
+  skipped: number;
 }

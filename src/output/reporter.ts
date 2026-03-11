@@ -55,6 +55,9 @@ export class ConsoleReporter implements Reporter {
     console.log(
       `    Failed:  ${data.failed > 0 ? pc.red(String(data.failed)) : String(data.failed)}`,
     );
+    if (data.skipped > 0) {
+      console.log(`    Skipped: ${data.skipped}`);
+    }
     console.log(`    Cached:  ${data.cached}`);
     console.log(`    Time:    ${pc.dim(formatDuration(data.totalDurationMs))}`);
     console.log(`  ${bar}`);

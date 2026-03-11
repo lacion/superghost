@@ -62,5 +62,6 @@ function aggregateResults(
     cached: results.filter(
       (r) => r.source === "cache" && r.status === "passed",
     ).length,
+    skipped: 0,
   };
 }

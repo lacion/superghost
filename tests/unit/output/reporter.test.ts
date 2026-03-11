@@ -224,12 +224,62 @@ describe("ConsoleReporter", () => {
         passed: 1,
         failed: 0,
         cached: 0,
+        skipped: 0,
       };
 
       reporter.onRunComplete(runResult);
 
       const output = logOutput.join("\n");
       expect(output).not.toContain("Failed tests:");
+    });
+
+    it("shows Skipped line when skipped > 0", () => {
+      const runResult: RunResult = {
+        results: [
+          {
+            testName: "Login Flow",
+            testCase: "check login works",
+            status: "passed",
+            source: "ai",
+            durationMs: 1500,
+          },
+        ],
+        totalDurationMs: 1500,
+        passed: 1,
+        failed: 0,
+        cached: 0,
+        skipped: 3,
+      };
+
+      reporter.onRunComplete(runResult);
+
+      const output = logOutput.join("\n");
+      expect(output).toContain("Skipped:");
+      expect(output).toContain("3");
+    });
+
+    it("does not show Skipped line when skipped is 0", () => {
+      const runResult: RunResult = {
+        results: [
+          {
+            testName: "Login Flow",
+            testCase: "check login works",
+            status: "passed",
+            source: "ai",
+            durationMs: 1500,
+          },
+        ],
+        totalDurationMs: 1500,
+        passed: 1,
+        failed: 0,
+        cached: 0,
+        skipped: 0,
+      };
+
+      reporter.onRunComplete(runResult);
+
+      const output = logOutput.join("\n");
+      expect(output).not.toContain("Skipped:");
     });
   });
 });

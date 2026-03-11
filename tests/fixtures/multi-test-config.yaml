@@ -1,0 +1,12 @@
+baseUrl: https://example.com
+model: gpt-4o
+modelProvider: openai
+tests:
+  - name: Login Flow
+    case: check that login works with valid credentials
+  - name: Login Error
+    case: check that login shows error with invalid credentials
+  - name: Dashboard Load
+    case: verify dashboard page loads and shows widgets
+  - name: Checkout Process
+    case: verify checkout flow completes successfully
