@@ -1,0 +1,52 @@
+baseUrl: http://localhost:3777
+cacheDir: e2e/.superghost-cache
+
+context: |
+  This is a Task Manager app built with React using hash-based routing.
+  The UI uses semantic HTML: labels on all inputs, descriptive button text, nav/main/h1 elements.
+  Seed data includes 3 tasks: "Set up project" (done), "Write documentation" (in_progress), "Add unit tests" (todo).
+  Login credentials: username "demo", password "password".
+  Navigation: Tasks (#/), New Task (#/new), Login (#/login).
+  Task rows have Edit and Delete buttons. Clicking a task title navigates to its detail page.
+
+tests:
+  - name: Homepage loads with task list
+    type: browser
+    case: Navigate to the homepage. Verify the heading says "Tasks" and all three seed tasks are visible — "Set up project", "Write documentation", and "Add unit tests".
+
+  - name: Create a new task
+    type: browser
+    case: |
+      Click "New Task" in the navigation. Fill in the title "Buy groceries" and description "Milk, eggs, bread".
+      Select priority "high". Submit the form. Verify you are redirected to the task detail page showing "Buy groceries".
+
+  - name: Edit an existing task
+    type: browser
+    case: |
+      From the homepage, click the "Edit" button next to "Write documentation".
+      Change the title to "Write full documentation". Submit the form.
+      Verify a success message appears saying "Task updated".
+
+  - name: Delete a task
+    type: browser
+    case: |
+      From the homepage, click the "Delete" button next to "Set up project".
+      Verify that "Set up project" is no longer visible in the task list.
+
+  - name: Filter tasks by status
+    type: browser
+    case: |
+      From the homepage, click the "Todo" filter button. Verify only tasks with "todo" status are shown.
+      Then click "All" to show all tasks again. Verify multiple tasks are visible.
+
+  - name: Change task status from detail page
+    type: browser
+    case: |
+      From the homepage, click the task title "Add unit tests" to go to its detail page.
+      Change the status dropdown to "In Progress". Verify the status has changed (the dropdown shows "in_progress" or "In Progress" as selected).
+
+  - name: Login flow
+    type: browser
+    case: |
+      Click "Login" in the navigation. Enter username "demo" and password "password".
+      Click "Log In". Verify a success message appears saying "Logged in as demo".

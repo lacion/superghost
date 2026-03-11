@@ -1,0 +1,16 @@
+baseUrl: https://example.com
+browser: firefox
+headless: false
+timeout: 30000
+maxAttempts: 5
+model: gpt-4o
+modelProvider: openai
+cacheDir: .my-cache
+recursionLimit: 200
+tests:
+  - name: Login Flow
+    case: check that login works with valid credentials
+  - name: Dashboard
+    case: verify dashboard loads after login
+    baseUrl: https://dashboard.example.com
+    timeout: 120000

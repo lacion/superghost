@@ -1,0 +1,9 @@
+baseUrl: not-a-url
+timeout: "fast"
+maxAttempts: 15
+tests:
+  - name: Missing Case Test
+  - case: missing name test
+  - name: Bad Timeout
+    case: test with invalid timeout
+    timeout: -5

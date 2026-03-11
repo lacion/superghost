@@ -1,0 +1,3 @@
+tests:
+  - name Login Flow
+    case: check that login works

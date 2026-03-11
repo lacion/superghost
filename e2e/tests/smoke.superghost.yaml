@@ -1,0 +1,17 @@
+baseUrl: http://localhost:3777
+cacheDir: e2e/.superghost-cache
+
+context: |
+  This is a Task Manager app. The API serves JSON at /api/* endpoints.
+  The browser UI is a React SPA at the root URL with hash-based routing.
+  Seed data includes 3 tasks: "Set up project" (done), "Write documentation" (in_progress), "Add unit tests" (todo).
+  Login credentials: username "demo", password "password".
+
+tests:
+  - name: API health check
+    type: api
+    case: Send a GET request to /api/health and verify the response status is 200 and the body contains "ok"
+
+  - name: Homepage shows tasks
+    type: browser
+    case: Navigate to the homepage and verify there is a heading containing "Tasks" and at least one task is visible in the list

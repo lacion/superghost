@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  test:
+    name: Test & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - run: bunx playwright install chromium
+
+      - name: Run tests
+        run: bun test
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Run E2E tests
+        run: bun run e2e:smoke
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  build-and-release:
+    name: Build Binaries & Create Release
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build binaries for all platforms
+        run: |
+          mkdir -p dist
+          for target in bun-darwin-arm64 bun-darwin-x64 bun-linux-arm64 bun-linux-x64; do
+            os_arch="${target#bun-}"
+            echo "Building superghost-$os_arch (target: $target)..."
+            bun build --compile \
+              --target="$target" \
+              --minify \
+              --bytecode \
+              --sourcemap \
+              src/cli.ts \
+              --outfile "dist/superghost-$os_arch"
+          done
+          ls -lh dist/superghost-*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/superghost-*
+
+  publish-npm:
+    name: Publish to npm
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
