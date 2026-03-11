@@ -20,6 +20,11 @@
     "e2e:browser": "bun run e2e/run-e2e.ts browser",
     "e2e:api": "bun run e2e/run-e2e.ts api",
     "e2e:all": "bun run e2e/run-e2e.ts all",
+    "e2e:headed": "bun run e2e/run-e2e.ts smoke --headed",
+    "e2e:smoke:headed": "bun run e2e/run-e2e.ts smoke --headed",
+    "e2e:browser:headed": "bun run e2e/run-e2e.ts browser --headed",
+    "e2e:api:headed": "bun run e2e/run-e2e.ts api --headed",
+    "e2e:all:headed": "bun run e2e/run-e2e.ts all --headed",
     "e2e:app": "bun run e2e/app/server.ts"
   },
   "keywords": [

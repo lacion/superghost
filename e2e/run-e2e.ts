@@ -21,8 +21,11 @@ async function main() {
     process.exit(0);
   }
 
+  const headed = process.argv.includes("--headed");
+  const positionalArgs = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+
   // 2. Determine which suite to run
-  const suite = process.argv[2] || "smoke";
+  const suite = positionalArgs[0] || "smoke";
   const configs = SUITES[suite];
   if (!configs) {
     console.error(`Unknown suite: "${suite}". Available: ${Object.keys(SUITES).join(", ")}`);
@@ -49,8 +52,10 @@ async function main() {
   // 5. Run each config
   let failed = false;
   for (const config of configs) {
-    console.log(`\n--- Running: ${config} ---\n`);
-    const runner = Bun.spawn(["bun", "run", "src/cli.ts", "--config", config], {
+    console.log(`\n--- Running: ${config}${headed ? " (headed)" : ""} ---\n`);
+    const cliArgs = ["run", "src/cli.ts", "--config", config];
+    if (headed) cliArgs.push("--headed");
+    const runner = Bun.spawn(["bun", ...cliArgs], {
       stdout: "inherit",
       stderr: "inherit",
       env: Bun.env,

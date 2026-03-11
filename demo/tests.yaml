@@ -1,0 +1,11 @@
+baseUrl: http://localhost:3777
+model: claude-sonnet-4-20250514
+
+tests:
+  - name: API returns task list
+    type: api
+    case: GET /api/tasks returns 200 with a JSON array containing at least 3 tasks
+
+  - name: Homepage shows tasks
+    type: browser
+    case: Navigate to the homepage and verify the heading says "Tasks" and at least one task is visible

@@ -31,7 +31,8 @@ program
   .description("AI-powered end-to-end browser and API testing")
   .version(pkg.version)
   .requiredOption("-c, --config <path>", "Path to YAML config file")
-  .action(async (options: { config: string }) => {
+  .option("--headed", "Run browser in headed mode (visible browser window)")
+  .action(async (options: { config: string; headed?: boolean }) => {
     const pm = new ProcessManager();
     setupSignalHandlers(pm);
 
@@ -44,6 +45,9 @@ program
 
     try {
       const config = await loadConfig(options.config);
+      if (options.headed) {
+        config.headless = false;
+      }
       const reporter = new ConsoleReporter();
 
       // Infer provider: use explicit modelProvider unless it matches default and model suggests otherwise
@@ -99,7 +103,8 @@ program
 
       await mcpManager.close();
       await pm.killAll();
-      process.exit(result.failed > 0 ? 1 : 0);
+      const code = result.failed > 0 ? 1 : 0;
+      setTimeout(() => process.exit(code), 100);
     } catch (error) {
       if (mcpManager) {
         await mcpManager.close().catch(() => {});
@@ -108,11 +113,13 @@ program
 
       if (error instanceof ConfigLoadError) {
         Bun.write(Bun.stderr, `${pc.red("Error:")} ${error.message}\n`);
-        process.exit(1);
+        setTimeout(() => process.exit(1), 100);
+        return;
       }
       if (error instanceof Error && error.message.startsWith("Missing API key")) {
         Bun.write(Bun.stderr, `${pc.red("Error:")} ${error.message}\n`);
-        process.exit(1);
+        setTimeout(() => process.exit(1), 100);
+        return;
       }
       throw error;
     }

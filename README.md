@@ -4,6 +4,8 @@ Plain English test cases with AI execution and instant cached replay for CI/CD.
 
 Write tests in YAML. An AI agent executes them in a real browser or via API calls. Results are cached step-by-step so re-runs are instant and deterministic -- no flaky tests, no test code to maintain.
 
+![SuperGhost Demo](demo/demo.gif)
+
 ## Install
 
 ### Zero-install (recommended)
