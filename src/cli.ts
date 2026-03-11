@@ -79,6 +79,7 @@ program
 
       // Create cache subsystem
       const cacheManager = new CacheManager(config.cacheDir);
+      await cacheManager.migrateV1Cache();
       const toolExecutor: ToolExecutor = async (toolName, toolInput) => {
         const tool = tools[toolName];
         if (!tool) throw new Error(`Tool not found: ${toolName}`);

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: DX Polish + Reliability Hardening
-status: planning
-stopped_at: Phase 4 context gathered
-last_updated: "2026-03-11T22:21:32.160Z"
-last_activity: 2026-03-11 — Roadmap created for v0.2
+status: executing
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-11T22:53:48.298Z"
+last_activity: 2026-03-11 — Completed plan 04-01 (POSIX exit codes)
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 2
+  completed_plans: 1
+  percent: 50
 ---
 
 # Project State
@@ -26,24 +26,24 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 ## Current Position
 
 Phase: 4 of 7 (Foundation)
-Plan: — (not yet planned)
-Status: Ready to plan
-Last activity: 2026-03-11 — Roadmap created for v0.2
+Plan: 1 of 2 complete
+Status: Executing
+Last activity: 2026-03-11 — Completed plan 04-01 (POSIX exit codes)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0 (v0.2)
-- Average duration: —
-- Total execution time: —
+- Total plans completed: 1 (v0.2)
+- Average duration: 2min
+- Total execution time: 2min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 04-foundation | 1/2 | 2min | 2min |
 
 *Updated after each plan completion*
 
@@ -52,6 +52,9 @@ Progress: [░░░░░░░░░░] 0%
 ### Decisions
 
 Full decision log in PROJECT.md Key Decisions table.
+
+- (04-01) Used Commander exitOverride to intercept parse errors and re-exit with code 2
+- (04-01) Replaced throw error catch-all with explicit exit(2) and Unexpected error message
 
 ### Pending Todos
 
@@ -69,6 +72,6 @@ From research:
 
 ## Session Continuity
 
-Last session: 2026-03-11T22:21:32.157Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-foundation/04-CONTEXT.md
+Last session: 2026-03-11T22:53:02Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-foundation/04-01-SUMMARY.md

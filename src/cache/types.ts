@@ -6,7 +6,7 @@ export interface CachedStep {
 
 /** A complete cache entry with diagnostic metadata */
 export interface CacheEntry {
-  version: 1;
+  version: 1 | 2;
   testCase: string;
   baseUrl: string;
   steps: CachedStep[];

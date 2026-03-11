@@ -71,7 +71,7 @@ describe("CacheManager", () => {
       const content = await Bun.file(filePath).text();
       const entry = JSON.parse(content);
 
-      expect(entry.version).toBe(1);
+      expect(entry.version).toBe(2);
       expect(entry.testCase).toBe(testCase);
       expect(entry.baseUrl).toBe(baseUrl);
       expect(entry.steps).toEqual(steps);

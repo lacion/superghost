@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { mkdir, rename } from "node:fs/promises";
+import { mkdir, rename, readdir } from "node:fs/promises";
 import type { CacheEntry, CachedStep } from "./types.ts";
 
 /**
@@ -17,9 +17,30 @@ export class CacheManager {
   /**
    * Generate a deterministic 16-char hex hash key.
    * Uses Bun-native CryptoHasher for SHA-256 hashing.
+   *
+   * Normalization pipeline (v2):
+   * 1. Unicode NFC normalization + whitespace collapse (case-preserving)
+   * 2. URL normalization (lowercase hostname, strip trailing slash)
+   * 3. Version-prefixed input string ("v2|...")
    */
   static hashKey(testCase: string, baseUrl: string): string {
-    const input = `${testCase}|${baseUrl}`;
+    // Step 1: Unicode NFC + whitespace collapse (case-preserving per user decision)
+    const normalizedCase = testCase.normalize("NFC").replace(/\s+/g, " ").trim();
+
+    // Step 2: URL normalization (lowercase hostname, strip trailing slash)
+    let normalizedUrl: string;
+    try {
+      const url = new URL(baseUrl);
+      // new URL() lowercases hostname and strips default ports
+      // Manually strip trailing slash(es)
+      normalizedUrl = url.href.replace(/\/+$/, "");
+    } catch {
+      // Fallback for non-URL values (defensive)
+      normalizedUrl = baseUrl.replace(/\/+$/, "").toLowerCase();
+    }
+
+    // Step 3: Version-prefixed input
+    const input = `v2|${normalizedCase}|${normalizedUrl}`;
     const hasher = new Bun.CryptoHasher("sha256");
     hasher.update(input);
     return hasher.digest("hex").slice(0, 16);
@@ -52,7 +73,7 @@ export class CacheManager {
     const existing = await this.load(testCase, baseUrl);
 
     const entry: CacheEntry = {
-      version: 1,
+      version: 2,
       testCase,
       baseUrl,
       steps,
@@ -100,6 +121,31 @@ export class CacheManager {
       await Bun.file(filePath).delete();
     } catch {
       // No-op if file doesn't exist
+    }
+  }
+
+  /**
+   * Migrate v1 cache entries by deleting them.
+   * Scans the cache directory for JSON files with version 1 and removes them.
+   * v2 entries are preserved. Handles missing/empty cache directories gracefully.
+   */
+  async migrateV1Cache(): Promise<void> {
+    try {
+      const files = await readdir(this.cacheDir);
+      for (const file of files) {
+        if (!file.endsWith(".json")) continue;
+        try {
+          const filePath = join(this.cacheDir, file);
+          const entry = await Bun.file(filePath).json();
+          if (entry?.version === 1) {
+            await Bun.file(filePath).delete();
+          }
+        } catch {
+          // Skip corrupted files silently
+        }
+      }
+    } catch {
+      // Cache dir doesn't exist yet -- nothing to migrate
     }
   }
 }
