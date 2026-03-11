@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { CacheManager } from "../../../src/cache/cache-manager.ts";
 import type { CachedStep } from "../../../src/cache/types.ts";
@@ -145,6 +145,128 @@ describe("CacheManager", () => {
     test("does not throw when file does not exist", async () => {
       // Should not throw
       await manager.delete("nonexistent", "http://nowhere.com");
+    });
+  });
+
+  describe("hashKey normalization", () => {
+    const url = "http://localhost:3000";
+
+    test("whitespace-collapsed strings produce same hash (tabs vs spaces)", () => {
+      const hashTab = CacheManager.hashKey("check\tlogin\tform", url);
+      const hashSpace = CacheManager.hashKey("check login form", url);
+      expect(hashTab).toBe(hashSpace);
+    });
+
+    test("whitespace-collapsed strings produce same hash (newlines vs spaces)", () => {
+      const hashNewline = CacheManager.hashKey("check\nlogin\nform", url);
+      const hashSpace = CacheManager.hashKey("check login form", url);
+      expect(hashNewline).toBe(hashSpace);
+    });
+
+    test("whitespace-collapsed strings produce same hash (multiple spaces)", () => {
+      const hashMulti = CacheManager.hashKey("check   login   form", url);
+      const hashSingle = CacheManager.hashKey("check login form", url);
+      expect(hashMulti).toBe(hashSingle);
+    });
+
+    test("Unicode NFD and NFC produce same hash", () => {
+      // "cafe\u0301" (NFD) vs "caf\u00e9" (NFC) - both represent "cafe" with accent
+      const hashNFD = CacheManager.hashKey("caf\u0065\u0301", url);
+      const hashNFC = CacheManager.hashKey("caf\u00e9", url);
+      expect(hashNFD).toBe(hashNFC);
+    });
+
+    test("different letter casing produces DIFFERENT hash (case-preserving)", () => {
+      const hashUpper = CacheManager.hashKey("Check Login", url);
+      const hashLower = CacheManager.hashKey("check login", url);
+      expect(hashUpper).not.toBe(hashLower);
+    });
+
+    test("baseUrl with/without trailing slash produces same hash", () => {
+      const tc = "check login";
+      const hashNoSlash = CacheManager.hashKey(tc, "http://localhost:3000");
+      const hashSlash = CacheManager.hashKey(tc, "http://localhost:3000/");
+      expect(hashNoSlash).toBe(hashSlash);
+    });
+
+    test("baseUrl hostname casing produces same hash", () => {
+      const tc = "check login";
+      const hashUpper = CacheManager.hashKey(tc, "http://LOCALHOST:3000");
+      const hashLower = CacheManager.hashKey(tc, "http://localhost:3000");
+      expect(hashUpper).toBe(hashLower);
+    });
+  });
+
+  describe("v2 prefix", () => {
+    test("v2 hash differs from v1 hash for same inputs", () => {
+      // v1 hash (captured before normalization changes): 6185fa0005029c5c
+      // After v2 prefix, the hash MUST change.
+      const V1_HASH = "6185fa0005029c5c";
+      const currentHash = CacheManager.hashKey("check login", "http://localhost:3000");
+      expect(currentHash).not.toBe(V1_HASH);
+    });
+  });
+
+  describe("save version", () => {
+    test("save() writes version 2 in the cache file", async () => {
+      await manager.save(testCase, baseUrl, steps, diagnostics);
+
+      const hash = CacheManager.hashKey(testCase, baseUrl);
+      const filePath = join(cacheDir, `${hash}.json`);
+      const content = await Bun.file(filePath).text();
+      const entry = JSON.parse(content);
+
+      expect(entry.version).toBe(2);
+    });
+  });
+
+  describe("migrateV1Cache", () => {
+    test("deletes files with version 1 and preserves files with version 2", async () => {
+      // Create a v1 cache file
+      const v1File = join(cacheDir, "v1entry.json");
+      await Bun.write(v1File, JSON.stringify({
+        version: 1,
+        testCase: "old test",
+        baseUrl: "http://localhost:3000",
+        steps: [],
+        model: "test",
+        provider: "test",
+        stepCount: 0,
+        aiMessage: "test",
+        durationMs: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+
+      // Create a v2 cache file
+      const v2File = join(cacheDir, "v2entry.json");
+      await Bun.write(v2File, JSON.stringify({
+        version: 2,
+        testCase: "new test",
+        baseUrl: "http://localhost:3000",
+        steps: [],
+        model: "test",
+        provider: "test",
+        stepCount: 0,
+        aiMessage: "test",
+        durationMs: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+
+      await manager.migrateV1Cache();
+
+      const files = await readdir(cacheDir);
+      expect(files).not.toContain("v1entry.json");
+      expect(files).toContain("v2entry.json");
+    });
+
+    test("handles nonexistent cache directory gracefully", async () => {
+      const nonexistentDir = join(cacheDir, "does-not-exist");
+      const nonexistentManager = new CacheManager(nonexistentDir);
+
+      // Should not throw
+      await nonexistentManager.migrateV1Cache();
     });
   });
 });
