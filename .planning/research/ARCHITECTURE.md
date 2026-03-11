@@ -1,401 +1,667 @@
 # Architecture Research
 
-**Domain:** AI-powered E2E browser testing CLI tool
-**Researched:** 2026-03-10
-**Confidence:** HIGH — based on SuperGhost's natural language E2E architecture + Vercel AI SDK docs
+**Domain:** AI-powered E2E browser testing CLI tool — v0.2 DX feature integration
+**Researched:** 2026-03-11
+**Confidence:** HIGH — based on direct source inspection of the shipped v1.0 codebase
 
-## Standard Architecture
+---
 
-### System Overview
+## Context: What This Document Covers
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           CLI Layer                                   │
-│   superghost --config tests.yaml                                      │
-│   ┌──────────────────────────────────────────────────────────────┐   │
-│   │  CLI Entry Point (cli.ts)                                     │   │
-│   │  - Parse args (commander)                                     │   │
-│   │  - Load + validate config (Config Loader)                     │   │
-│   │  - Wire dependencies                                          │   │
-│   │  - Exit code 0/1                                              │   │
-│   └─────────────────────────┬────────────────────────────────────┘   │
-└─────────────────────────────┼───────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────────┐
-│                         Runner Layer                                   │
-│  ┌──────────────────┐       ┌─────────────────────────────────────┐  │
-│  │  TestRunner       │──────▶│  TestExecutor                        │  │
-│  │  - Iterates tests │       │  - Cache-first strategy              │  │
-│  │  - Calls Reporter │       │  - Retry loop (maxAttempts)          │  │
-│  │  - Aggregates     │       │  - Routes to Cache or Agent          │  │
-│  │    RunResult      │       │                                      │  │
-│  └──────────────────┘       └────────────┬──────────────────────┘  │
-└───────────────────────────────────────────┼─────────────────────────┘
-                                            │
-              ┌─────────────────────────────┼────────────────────────┐
-              │                             │                         │
-┌─────────────▼────────────┐   ┌───────────▼────────────────────────┐│
-│      Cache Layer          │   │           Agent Layer               ││
-│  ┌────────────────────┐  │   │  ┌──────────────────────────────┐  ││
-│  │  CacheManager      │  │   │  │  AgentRunner                  │  ││
-│  │  - SHA-256 hash key│  │   │  │  - Vercel AI SDK generateText │  ││
-│  │  - Read/write JSON │  │   │  │  - System prompt builder      │  ││
-│  │  - Bun file I/O    │  │   │  │  - Step recorder wrapper      │  ││
-│  └────────────────────┘  │   │  └──────────────┬───────────────┘  ││
-│  ┌────────────────────┐  │   │                 │                   ││
-│  │  StepReplayer      │  │   │  ┌──────────────▼───────────────┐  ││
-│  │  - Execute steps   │  │   │  │  ModelFactory                 │  ││
-│  │    from cache      │  │   │  │  - Anthropic / OpenAI /       │  ││
-│  │  - Detect stale    │  │   │  │    Gemini / OpenRouter        │  ││
-│  └────────────────────┘  │   │  │  - Vercel AI SDK providers    │  ││
-│  ┌────────────────────┐  │   │  └──────────────────────────────┘  ││
-│  │  StepRecorder      │  │   │  ┌──────────────────────────────┐  ││
-│  │  - Intercepts MCP  │  │   │  │  McpClientFactory             │  ││
-│  │    tool calls      │  │   │  │  - Spawn @playwright/mcp via  │  ││
-│  │  - Records to steps│  │   │  │    stdio                      │  ││
-│  └────────────────────┘  │   │  │  - Expose tools to AI agent   │  ││
-└──────────────────────────┘   │  └──────────────────────────────┘  ││
-                               └────────────────────────────────────┘│
-                                                                      │
-┌─────────────────────────────────────────────────────────────────────┘
-│                     External Processes (stdio)
-│  ┌────────────────────────────┐   ┌─────────────────────────────┐
-│  │  @playwright/mcp (child    │   │  curl MCP server (optional,  │
-│  │  process, stdio transport) │   │  API testing)                │
-│  └────────────────────────────┘   └─────────────────────────────┘
-└─────────────────────────────────────────────────────────────────────
-```
+This is a v0.2 integration architecture document. It focuses exclusively on how the five new features thread through the existing v1.0 architecture. The v1.0 architecture document (written 2026-03-10) covers the baseline system design. This document answers:
 
-### Component Responsibilities
+- Where does each new flag/feature attach to the existing execution flow?
+- What is new code vs. modified existing code?
+- What are the data flow changes?
+- What build order respects dependencies between the new features?
 
-| Component | Responsibility | Communicates With |
-|-----------|---------------|-------------------|
-| `cli.ts` | Parse CLI args, wire all dependencies, set exit code | Config Loader, TestRunner, Reporter |
-| `Config Loader` | Read YAML, validate with Zod, apply defaults | `cli.ts` only |
-| `TestRunner` | Iterate tests sequentially, aggregate RunResult | TestExecutor, Reporter |
-| `TestExecutor` | Cache-first execution decision, retry loop | CacheManager, AgentRunner |
-| `CacheManager` | SHA-256 keyed JSON file store in `.superghost-cache/` | TestExecutor, StepRecorder, StepReplayer |
-| `StepRecorder` | Intercept MCP tool calls during AI execution, record to steps array | AgentRunner (wraps tools) |
-| `StepReplayer` | Re-execute cached steps via MCP client, detect staleness | TestExecutor, McpClientFactory |
-| `AgentRunner` | Build system prompt, call `generateText` with tools, return result | ModelFactory, McpClientFactory, StepRecorder |
-| `ModelFactory` | Instantiate Vercel AI SDK provider from config (model string + API keys) | AgentRunner |
-| `McpClientFactory` | Spawn `@playwright/mcp` child process via stdio, expose tools | AgentRunner, StepReplayer |
-| `Reporter` | Write status lines and summary to stdout | TestRunner |
+---
 
-## Recommended Project Structure
+## Existing Architecture: Execution Flow Summary
+
+Before mapping integration points, here is the current end-to-end call chain that the new features must thread through:
 
 ```
-src/
-├── cli.ts                   # Entry point, arg parsing, dependency wiring
-├── index.ts                 # Public re-exports (programmatic API surface)
-│
-├── config/
-│   ├── schema.ts            # Zod schema (ConfigSchema, TestCaseSchema)
-│   ├── loader.ts            # YAML read + Zod validate + ConfigLoadError
-│   └── types.ts             # Config, TestCase (inferred from Zod)
-│
-├── runner/
-│   ├── test-runner.ts       # Sequential iteration over all tests
-│   ├── test-executor.ts     # Cache-first logic + retry loop per test
-│   └── types.ts             # TestResult, RunResult, TestStatus, TestSource
-│
-├── agent/
-│   ├── agent-runner.ts      # generateText + tool loop (replaces LangGraph agent)
-│   ├── model-factory.ts     # Vercel AI SDK provider instantiation
-│   ├── mcp-client.ts        # createMCPClient (stdio transport to @playwright/mcp)
-│   ├── prompt.ts            # System prompt builder (pure function)
-│   └── types.ts             # AgentExecutionResult
-│
-├── cache/
-│   ├── cache-manager.ts     # SHA-256 hashing, JSON read/write (Bun file API)
-│   ├── step-recorder.ts     # MCP tool call interception + steps array
-│   ├── step-replayer.ts     # Sequential step re-execution via MCP
-│   └── types.ts             # CachedStep, CacheEntry
-│
-└── output/
-    ├── reporter.ts          # ConsoleReporter (onTestStart, onTestComplete, onRunComplete)
-    └── types.ts             # Reporter interface, ReportData
+cli.ts
+  |
+  ├── loadConfig(options.config)              // config/loader.ts
+  ├── new ConsoleReporter()                   // output/reporter.ts
+  ├── inferProvider() + validateApiKey()      // agent/model-factory.ts
+  ├── createModel()                           // agent/model-factory.ts
+  ├── new McpManager(...).initialize()        // agent/mcp-manager.ts
+  ├── new CacheManager(config.cacheDir)       // cache/cache-manager.ts
+  ├── new StepReplayer(toolExecutor)          // cache/step-replayer.ts
+  ├── new TestExecutor({...})                 // runner/test-executor.ts
+  ├── new TestRunner(config, reporter, fn)    // runner/test-runner.ts
+  └── runner.run() → RunResult
+        |
+        └── for each test:
+              TestExecutor.execute(testCase, baseUrl, testContext)
+                |
+                ├── CacheManager.load(testCase, baseUrl)
+                │     → hit: StepReplayer.replay(steps) → TestResult
+                │     → miss: executeAgent({model, tools, testCase, ...})
+                │               |
+                │               └── generateText({model, tools, system, prompt, stopWhen, output})
+                │                     → CacheManager.save(testCase, baseUrl, steps, diag)
+                │                     → TestResult
+                └── Reporter.onTestComplete(result)
 ```
 
-### Structure Rationale
+Exit code: `result.failed > 0 ? 1 : 0` (only two codes today).
 
-- **`config/`:** Everything about reading and validating user intent. No business logic. Isolated so the CLI and future programmatic callers share the same loader.
-- **`runner/`:** Pure orchestration. `TestRunner` knows nothing about AI or caching — it only iterates and delegates. `TestExecutor` owns the cache-or-AI decision tree.
-- **`agent/`:** AI concerns only. The module boundary means you can swap Vercel AI SDK for another framework without touching the runner or cache. `mcp-client.ts` is separate from `agent-runner.ts` so the replayer can reuse MCP tool execution without an AI model.
-- **`cache/`:** File I/O and serialization in one place. Uses Bun native file APIs for performance. `StepRecorder` and `StepReplayer` are symmetric: recorder writes, replayer reads.
-- **`output/`:** Decoupled from all execution logic. Accepts events (start, complete, run summary) — easy to swap for JSON output or CI-specific formatting.
+---
 
-## Architectural Patterns
+## Feature Integration Map
 
-### Pattern 1: Cache-First with AI Fallback
+### Feature 1: `--only <pattern>` Flag
 
-**What:** Before invoking the AI model, attempt deterministic replay of cached MCP tool calls. Only invoke AI on cache miss or cache staleness (replay failure).
+**Where it attaches:** `cli.ts` → `config.tests` filtering → `TestRunner`
 
-**When to use:** Every test execution. This is the core performance contract: fast by default, AI only when necessary.
+**Mechanism:** Filter `config.tests` after `loadConfig()`, before constructing `TestRunner`. No changes needed inside `TestRunner`, `TestExecutor`, or any other module.
 
-**Trade-offs:** Eliminates AI cost and latency on warm runs. Cache can become stale silently — detection is reactive (replay fails), not proactive.
+**New vs. Modified:**
+- `cli.ts` — modified: add `.option("--only <pattern>", ...)` to Commander definition; after loadConfig, apply `config.tests = config.tests.filter(t => t.name.includes(options.only) || t.case.includes(options.only))` (or glob/regex match per spec)
 
-**Example:**
+**Data flow change:**
+```
+cli.ts:
+  loadConfig(path) → Config
+  if (options.only):
+    config.tests = config.tests.filter(matchesPattern(options.only))
+  → TestRunner(config, ...)
+```
+
+**No changes required in:** `TestRunner`, `TestExecutor`, `CacheManager`, `AgentRunner`, `Reporter`
+
+**Edge case:** If the filtered list is empty, exit 0 with a message (not exit 2 — empty `--only` match is a valid user action, not a runtime error).
+
+---
+
+### Feature 2: `--no-cache` Flag
+
+**Where it attaches:** `cli.ts` → `TestExecutor` constructor
+
+**Mechanism:** Pass a `noCache` boolean into `TestExecutor`. When true, skip `CacheManager.load()` (force AI path). Whether to also skip `CacheManager.save()` on success is a design choice — the safest default is to still write the cache (the flag means "don't read stale cache", not "produce no cache"). Document this behavior explicitly.
+
+**New vs. Modified:**
+- `cli.ts` — modified: add `.option("--no-cache", ...)` to Commander; pass `noCache: !!options.noCache` into `TestExecutor` constructor options
+- `runner/test-executor.ts` — modified: add `noCache?: boolean` to constructor options; in `execute()`, guard `CacheManager.load()` with `if (!this.noCache)`
+
+**Data flow change:**
+```
+TestExecutor.execute(testCase, baseUrl):
+  if (!this.noCache):
+    cached = CacheManager.load(...)
+    if (cached && replay.success): return cache result
+  // Always fall through to AI when --no-cache
+  return this.executeWithAgent(...)
+```
+
+**No changes required in:** `TestRunner`, `CacheManager`, `AgentRunner`, `Reporter`, `cli.ts` wiring beyond options pass-through
+
+---
+
+### Feature 3: `--dry-run` Flag
+
+**Where it attaches:** `cli.ts` → skip MCP initialization → `TestRunner` receives a stub `executeFn`
+
+**Mechanism:** Dry-run must skip MCP server spawning (no `mcpManager.initialize()`) and skip AI execution. The cleanest integration is to short-circuit the `executeFn` passed to `TestRunner` — return a synthetic `TestResult` for every test without touching `TestExecutor`. This means dry-run does NOT require changes to `TestExecutor`, `CacheManager`, or `AgentRunner`.
+
+**New vs. Modified:**
+- `cli.ts` — modified: add `.option("--dry-run", ...)` to Commander; add a branch:
+  ```
+  if (options.dryRun):
+    // Skip McpManager init, skip TestExecutor construction
+    const dryRunFn: ExecuteFn = (testCase, baseUrl) => Promise.resolve({
+      testName: testCase, testCase, status: "passed",
+      source: "dry-run", durationMs: 0
+    })
+    const runner = new TestRunner(config, reporter, dryRunFn)
+    const result = await runner.run()
+    process.exit(0)
+  ```
+- `runner/types.ts` — modified: extend `TestSource` type to include `"dry-run"` (or use a separate `dryRun?: boolean` flag on `TestResult`)
+- `output/reporter.ts` — modified: add handling for `source === "dry-run"` in `onTestComplete` display
+
+**Data flow change:**
+```
+cli.ts:
+  if (options.dryRun):
+    skip McpManager.initialize()
+    skip CacheManager construction
+    skip TestExecutor construction
+    stub executeFn → synthetic TestResults
+    reporter shows "dry-run" source label
+    exit 0
+```
+
+**No changes required in:** `TestRunner` (it accepts any `executeFn`), `TestExecutor`, `CacheManager`, `AgentRunner`, `McpManager`
+
+**Why this approach:** `TestRunner` already accepts `executeFn` via injection. Dry-run is just a different function at the same injection site — no new abstraction layer needed.
+
+---
+
+### Feature 4: `--verbose` Flag
+
+**Where it attaches:** `cli.ts` → `Reporter` variant + `executeAgent` `onStepFinish` callback
+
+**Mechanism:** Verbose mode has two output surfaces:
+1. **Reporter-level verbose:** Show more detail in `onTestComplete` (step count, AI message, cache metadata). Controlled by passing a `verbose` flag to `ConsoleReporter`.
+2. **Agent step-level verbose:** Print each MCP tool call in real time as the AI executes. Controlled by passing an `onStepFinish` callback into `executeAgent`.
+
+The Vercel AI SDK's `generateText` supports `onStepFinish` (callback invoked after each tool step). This is the correct hook for real-time step progress — it is invoked synchronously between tool calls, before the final response.
+
+**New vs. Modified:**
+- `cli.ts` — modified: add `.option("--verbose", ...)` to Commander; pass `verbose` to `ConsoleReporter` constructor; pass `onStepFinish` handler into `TestExecutor` (or directly into `executeAgent` config)
+- `output/reporter.ts` — modified: add `verbose?: boolean` constructor option; in `onTestComplete`, when verbose, print step count and AI message
+- `agent/agent-runner.ts` — modified: accept optional `onStepFinish?: (step: StepInfo) => void` in the config parameter; pass it into `generateText`
+- `runner/test-executor.ts` — modified: thread `onStepFinish` through `executeAgentFn` config if provided
+
+**Data flow change (verbose step progress):**
+```
+executeAgent({..., onStepFinish}):
+  generateText({
+    ...,
+    onStepFinish: (step) => {
+      if (onStepFinish && step.toolCalls):
+        for each toolCall in step.toolCalls:
+          onStepFinish({ toolName: toolCall.toolName, toolInput: toolCall.input })
+    }
+  })
+```
+
+**Output format for verbose step progress:**
+```
+  [step 1] browser_navigate { url: "https://example.com" }
+  [step 2] browser_snapshot {}
+  [step 3] browser_click { selector: "button[type=submit]" }
+```
+
+**No changes required in:** `TestRunner`, `CacheManager`, `StepRecorder`, `StepReplayer`
+
+**Note:** `onStepFinish` in Vercel AI SDK is a function callback on the `generateText` options object. It fires after each agent step (one step = one round of tool calls). This is HIGH confidence from Vercel AI SDK docs — the parameter exists and behaves as described.
+
+---
+
+### Feature 5: Preflight `baseUrl` Reachability Check
+
+**Where it attaches:** `cli.ts` — between `loadConfig()` and `mcpManager.initialize()`, or inside `TestRunner.run()` before the test loop
+
+**Mechanism:** Issue an HTTP HEAD (or GET) request to the `baseUrl` and verify the response is reachable (status < 500, or simply that the connection doesn't time out). Failure should exit with code 2 (config/runtime error), not code 1 (test failure).
+
+**Two viable attachment points:**
+
+Option A — in `cli.ts`, before MCP init:
+```
+config = await loadConfig(options.config)
+if (config.baseUrl):
+  await checkReachability(config.baseUrl)  // throws PreflightError on failure
+mcpManager.initialize()
+```
+
+Option B — in `TestRunner.run()`, at the start of the loop:
+```
+async run():
+  if (this.config.baseUrl):
+    await this.preflightCheck(this.config.baseUrl)
+  for each test: ...
+```
+
+**Recommended: Option A (in `cli.ts`)** because:
+- Preflight is a startup concern, not a per-test concern
+- Failure should produce exit code 2 before any MCP processes are spawned
+- Keeps `TestRunner` focused on test iteration, not infrastructure checks
+- Consistent with where `validateApiKey` already lives (startup, before test execution)
+
+**New code:**
+- `infra/preflight.ts` — new file: `async function checkBaseUrl(url: string): Promise<void>` — fetch with a short timeout (5s), throw `PreflightError` if unreachable
+- `cli.ts` — modified: call `checkBaseUrl(config.baseUrl)` in the try block, before MCP init; catch `PreflightError` in the catch block alongside `ConfigLoadError`, exiting with code 2
+
+**Data flow change:**
+```
+cli.ts (try block):
+  config = await loadConfig(options.config)
+  if (config.baseUrl):
+    await checkBaseUrl(config.baseUrl)   // NEW — exits 2 on failure
+  validateApiKey(provider)
+  mcpManager.initialize()
+  ...
+
+cli.ts (catch block):
+  if (error instanceof PreflightError):
+    stderr("Cannot reach baseUrl: ...")
+    process.exit(2)                      // NEW exit code
+```
+
+**No changes required in:** `TestRunner`, `TestExecutor`, `CacheManager`, `AgentRunner`
+
+**Implementation note:** Use `fetch()` with an `AbortController` timeout (Bun supports native fetch). Check for per-test `baseUrl` overrides — if individual tests have different `baseUrl` values, consider checking only the global `config.baseUrl` for the preflight (per-test URLs are checked as tests run, not at startup).
+
+---
+
+### Feature 6: Real-Time Step Progress Output
+
+**Where it attaches:** `executeAgent` via Vercel AI SDK `onStepFinish` callback
+
+This is covered under `--verbose` (Feature 4) above. Real-time step progress IS the verbose step output. The two features are architecturally the same hook — `onStepFinish` in `generateText`.
+
+If the spec requires step progress in non-verbose mode too (e.g., always show step count during execution), the integration point is the same — just always attach the `onStepFinish` handler and print to stdout. The `ConsoleReporter` spinner can be updated with step-in-progress text via `spinner.update()` (nanospinner supports this).
+
+**Reporter integration for progress updates:**
+```
+// In Reporter interface (output/types.ts) — new optional method:
+onStepProgress?(toolName: string, stepNumber: number): void
+
+// In ConsoleReporter:
+onStepProgress(toolName: string, stepNumber: number): void:
+  this.spinner?.update({ text: `${testName} [step ${stepNumber}: ${toolName}]` })
+```
+
+This keeps step progress observable through the Reporter interface without coupling agent internals to console output directly.
+
+---
+
+### Feature 7: Distinct Exit Codes (0 / 1 / 2)
+
+**Where it attaches:** `cli.ts` catch block
+
+**Current state:** Only two exit codes exist:
+- `0` — all tests passed
+- `1` — any test failed OR any thrown error (both use `exit(1)`)
+
+**v0.2 requirement:**
+- `0` — all tests passed
+- `1` — one or more tests failed (test failures)
+- `2` — config error, runtime error, preflight failure, missing API key
+
+**New vs. Modified:**
+- `cli.ts` — modified: change catch block to use `exit(2)` for all non-test-failure errors:
+  ```
+  catch (error):
+    if (error instanceof ConfigLoadError): exit(2)
+    if (error instanceof PreflightError): exit(2)
+    if (error.message.startsWith("Missing API key")): exit(2)
+    // Unhandled errors also exit(2) (runtime errors)
+    exit(2)
+  ```
+- The success path stays: `result.failed > 0 ? exit(1) : exit(0)`
+
+**No new types or modules required** — this is purely a change to the exit code selection logic in `cli.ts`.
+
+---
+
+### Feature 8: Cache Key Normalization
+
+**Where it attaches:** `CacheManager.hashKey()` — single static method in `cache/cache-manager.ts`
+
+**Current state:**
 ```typescript
-async execute(testCase: string, baseUrl: string): Promise<TestResult> {
-  const cached = await this.cacheManager.load(testCase, baseUrl);
-  if (cached) {
-    const replay = await this.replayFn(cached.steps);
-    if (replay.success) return buildResult(testCase, "passed", "cache", start);
-    // Fall through: cache is stale
-  }
-  return this.executeWithAgent(testCase, baseUrl, start);
+static hashKey(testCase: string, baseUrl: string): string {
+  const input = `${testCase}|${baseUrl}`;
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(input);
+  return hasher.digest("hex").slice(0, 16);
 }
 ```
 
-### Pattern 2: Tool-Intercepting Step Recorder
+The hash is computed from the raw string. Any whitespace difference (leading spaces, trailing newlines, multiple spaces between words) produces a different key for semantically identical test cases.
 
-**What:** Wrap each MCP tool function before passing it to the AI SDK. The wrapper records the tool name and input after successful execution. The AI agent never knows recording is happening.
-
-**When to use:** Exclusively during AI-driven execution. The recorded steps become the cache entry on success.
-
-**Trade-offs:** Clean separation — the agent code stays pure. The wrapper ordering matters: record AFTER success, not before, so failed tool calls are not cached.
-
-**Example:**
+**Change required:**
 ```typescript
-// Wrap tools before passing to generateText
-const wrappedTools = Object.fromEntries(
-  Object.entries(mcpTools).map(([name, tool]) => [
-    name,
-    {
-      ...tool,
-      execute: async (input: unknown) => {
-        const result = await tool.execute(input);
-        recorder.record(name, input as Record<string, unknown>);
-        return result;
-      },
-    },
-  ])
-);
+static normalizeKey(s: string): string {
+  return s.trim().replace(/\s+/g, " ");
+}
+
+static hashKey(testCase: string, baseUrl: string): string {
+  const input = `${this.normalizeKey(testCase)}|${this.normalizeKey(baseUrl)}`;
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(input);
+  return hasher.digest("hex").slice(0, 16);
+}
 ```
 
-### Pattern 3: Vercel AI SDK generateText Agent Loop
+**Migration concern:** Existing cache files have keys computed without normalization. After this change, any test case that had extra whitespace will produce a new hash, missing the existing cache entry. The cache will self-heal (AI re-executes and writes a new entry with the normalized key). Old entries become orphaned files — acceptable, since the cache is a `.superghost-cache/` directory users can delete.
 
-**What:** Use `generateText` with `maxSteps` (or `stopWhen`) rather than a stateful agent class. The model calls MCP tools iteratively until it produces a terminal response (`TEST_PASSED:` or `TEST_FAILED:`).
+**New vs. Modified:**
+- `cache/cache-manager.ts` — modified: add `normalizeKey()` static method; apply to both `testCase` and `baseUrl` in `hashKey()`
 
-**When to use:** For AI-driven test execution. Replaces LangGraph's `createReactAgent` from the reference implementation.
+**No changes required in:** `cli.ts`, `TestExecutor`, `StepRecorder`, `StepReplayer`, any other module (they all call `hashKey` indirectly through `CacheManager.load/save/delete`)
 
-**Trade-offs:** Simpler dependency tree than LangGraph. `steps` array from `generateText` gives full tool call history for recording. No persistent state — each test gets a fresh call.
+---
 
-**Example:**
+## System Overview: v0.2 Integrated Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                            CLI Layer                                   │
+│  superghost --config tests.yaml [--dry-run] [--verbose]               │
+│             [--no-cache] [--only <pattern>]                            │
+│                                                                        │
+│  ┌──────────────────────────────────────────────────────────────┐     │
+│  │  cli.ts                                                        │     │
+│  │  1. loadConfig()                                               │     │
+│  │  2. filter config.tests on --only pattern           [NEW]     │     │
+│  │  3. checkBaseUrl(config.baseUrl) preflight          [NEW]     │     │
+│  │  4. validateApiKey()                                           │     │
+│  │  5. McpManager.initialize()  (skipped on --dry-run) [MOD]    │     │
+│  │  6. wire TestExecutor (noCache, onStepFinish flags) [MOD]    │     │
+│  │  7. runner.run()                                               │     │
+│  │  8. exit 0/1/2                                      [MOD]    │     │
+│  └──────────────────────────────┬───────────────────────────────┘     │
+└─────────────────────────────────┼────────────────────────────────────┘
+                                  │
+┌─────────────────────────────────▼────────────────────────────────────┐
+│                          Runner Layer                                   │
+│  ┌──────────────────┐      ┌──────────────────────────────────────┐   │
+│  │  TestRunner       │─────▶│  TestExecutor                         │   │
+│  │  (unchanged)      │      │  - noCache flag bypasses load()      │   │
+│  │                   │      │  - threads onStepFinish through      │   │
+│  │                   │      │    executeAgentFn config             │   │
+│  └──────────────────┘      └──────────────────┬───────────────────┘   │
+└─────────────────────────────────────────────────┼──────────────────────┘
+                                                  │
+               ┌──────────────────────────────────┼────────────────────┐
+               │                                  │                     │
+┌──────────────▼───────────────┐  ┌───────────────▼────────────────────┐
+│       Cache Layer             │  │          Agent Layer                │
+│  ┌─────────────────────────┐ │  │  ┌───────────────────────────────┐ │
+│  │  CacheManager           │ │  │  │  executeAgent()                │ │
+│  │  + normalizeKey()  [MOD]│ │  │  │  + onStepFinish callback [MOD]│ │
+│  │  - hashKey normalized   │ │  │  │  fires on each tool step      │ │
+│  └─────────────────────────┘ │  │  └───────────────────────────────┘ │
+│  ┌─────────────────────────┐ │  └────────────────────────────────────┘
+│  │  StepReplayer            │ │
+│  │  (unchanged)             │ │
+│  └─────────────────────────┘ │  ┌─────────────────────────────────────┐
+└──────────────────────────────┘  │       Infra Layer                    │
+                                  │  ┌───────────────────────────────┐  │
+┌──────────────────────────────┐  │  │  preflight.ts          [NEW]  │  │
+│       Output Layer            │  │  │  checkBaseUrl(url)            │  │
+│  ┌─────────────────────────┐ │  │  └───────────────────────────────┘  │
+│  │  ConsoleReporter         │ │  │  ┌───────────────────────────────┐  │
+│  │  + verbose flag    [MOD]│ │  │  │  ProcessManager (unchanged)   │  │
+│  │  + onStepProgress  [MOD]│ │  │  └───────────────────────────────┘  │
+│  └─────────────────────────┘ │  └─────────────────────────────────────┘
+└──────────────────────────────┘
+```
+
+---
+
+## Component Change Summary
+
+### Modified Existing Files
+
+| File | Change | Reason |
+|------|--------|--------|
+| `src/cli.ts` | Add 4 new CLI options to Commander; add `--only` filter; add preflight call; add `--dry-run` branch; thread `verbose`/`noCache` flags to constructors; fix exit codes in catch | Central wiring point for all flags |
+| `src/runner/test-executor.ts` | Add `noCache?: boolean` and `onStepFinish?` to constructor options; guard `CacheManager.load()` with `noCache` check; pass `onStepFinish` into `executeAgentFn` | Owns cache-first decision + agent invocation |
+| `src/agent/agent-runner.ts` | Add `onStepFinish?` to config parameter type; pass to `generateText` call | Vercel AI SDK step hook lives here |
+| `src/cache/cache-manager.ts` | Add `normalizeKey()` static method; apply to `hashKey()` inputs | Only hash computation needs to change |
+| `src/output/reporter.ts` | Add `verbose?: boolean` to constructor; add `onStepProgress()` method; handle `"dry-run"` source in `onTestComplete` | Output formatting for new modes |
+| `src/output/types.ts` | Add `onStepProgress?(toolName: string, step: number): void` to `Reporter` interface | Keeps reporter interface consistent |
+| `src/runner/types.ts` | Add `"dry-run"` to `TestSource` union OR add `dryRun?: boolean` to `TestResult` | Needed for dry-run result labeling |
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `src/infra/preflight.ts` | `checkBaseUrl(url: string): Promise<void>` — fetch with timeout, throw `PreflightError` on failure |
+
+### Unchanged Files
+
+| File | Reason Unchanged |
+|------|-----------------|
+| `src/runner/test-runner.ts` | Accepts injected `executeFn` — dry-run uses a different `executeFn`, no change needed |
+| `src/config/loader.ts` | Config loading is unaffected by DX flags |
+| `src/config/schema.ts` | No new config fields (all flags are CLI-only, not YAML-config) |
+| `src/cache/step-recorder.ts` | Step recording internals unchanged |
+| `src/cache/step-replayer.ts` | Replay logic unchanged |
+| `src/agent/mcp-manager.ts` | MCP lifecycle unchanged |
+| `src/agent/model-factory.ts` | Provider/model creation unchanged |
+| `src/agent/prompt.ts` | System prompt unchanged |
+| `src/infra/process-manager.ts` | Process cleanup unchanged |
+| `src/infra/signals.ts` | Signal handling unchanged |
+
+---
+
+## Data Flow Changes
+
+### v0.2 CLI Startup Flow
+
+```
+User: superghost --config tests.yaml --only "login" --verbose --no-cache
+
+cli.ts:
+  1. Commander parses flags: { config, only: "login", verbose: true, noCache: true }
+  2. loadConfig(options.config) → Config                  // unchanged
+  3. config.tests = config.tests.filter(matchesOnly)      // NEW: --only filter
+  4. await checkBaseUrl(config.baseUrl)                   // NEW: preflight
+      → fetch(baseUrl, { signal: AbortSignal.timeout(5000) })
+      → throws PreflightError → catch → stderr + exit(2)
+      → resolves → continue
+  5. inferProvider(), validateApiKey()                    // unchanged
+  6. createModel()                                        // unchanged
+  7. mcpManager.initialize()                              // unchanged (skipped for --dry-run)
+  8. new CacheManager(...)                                // unchanged
+  9. new StepReplayer(...)                                // unchanged
+  10. new TestExecutor({ noCache: true, onStepFinish })   // MODIFIED: extra options
+  11. new ConsoleReporter({ verbose: true })              // MODIFIED: extra option
+  12. new TestRunner(config, reporter, executeFn)         // unchanged
+  13. runner.run()
+  14. exit(result.failed > 0 ? 1 : 0)
+  catch ConfigLoadError → exit(2)                        // MODIFIED: was exit(1)
+  catch PreflightError  → exit(2)                        // NEW
+  catch "Missing API key" → exit(2)                      // MODIFIED: was exit(1)
+  catch unknown → exit(2)                                // MODIFIED: was throw
+```
+
+### v0.2 Verbose Agent Execution Flow
+
+```
+TestExecutor.executeWithAgent(testCase, baseUrl, ...):
+  executeAgentFn({
+    ...,
+    onStepFinish: (step) => reporter.onStepProgress(toolName, stepNum)  // NEW
+  })
+
+executeAgent(config):
+  recorder = new StepRecorder()
+  generateText({
+    model, tools: wrappedTools, system, prompt, stopWhen, output,
+    onStepFinish: (step) => {                                           // NEW
+      for toolCall in step.toolCalls:
+        config.onStepFinish?.({ toolName, stepNum })
+    }
+  })
+
+ConsoleReporter.onStepProgress(toolName, stepNum):
+  this.spinner?.update({ text: `${testName} [step ${stepNum}: ${toolName}]` })
+```
+
+### v0.2 Cache Key Normalization Flow
+
+```
+Before (v1.0):
+  hashKey("  Log in to the app  ", "https://example.com")
+  input = "  Log in to the app  |https://example.com"
+  hash → "a1b2c3d4e5f60000"
+
+After (v0.2):
+  hashKey("  Log in to the app  ", "https://example.com")
+  normalized = "Log in to the app|https://example.com"
+  hash → "f9e8d7c6b5a40000"  ← different hash, consistent across whitespace variants
+```
+
+---
+
+## Build Order
+
+Dependencies between v0.2 features determine the correct implementation sequence:
+
+**Phase 1 — No dependencies (build first, enables everything else):**
+
+1. **Cache key normalization** (`cache/cache-manager.ts`)
+   - Isolated static method change. No dependents need to change.
+   - Can be shipped and tested independently with unit tests.
+
+2. **Exit code fix** (`cli.ts` catch block only)
+   - Mechanical change. No new types, no new modules.
+   - Unblocks all features that need exit code 2 on failure.
+
+**Phase 2 — New infrastructure (no inter-feature dependencies):**
+
+3. **`infra/preflight.ts`** — new module, tested in isolation
+4. **Preflight wiring in `cli.ts`** — requires `preflight.ts` from step 3
+
+**Phase 3 — Flag threading (each flag is independent):**
+
+5. **`--only <pattern>`** — `cli.ts` only, no downstream changes
+   - Depends only on `loadConfig()` result being available (always true)
+
+6. **`--no-cache`** — `cli.ts` + `TestExecutor` constructor option
+   - Simple boolean passthrough; no new types needed
+
+7. **`--dry-run`** — `cli.ts` branch + `runner/types.ts` + `output/reporter.ts`
+   - Requires `TestSource` type extension before reporter changes
+
+**Phase 4 — Verbose / step progress (most complex, depends on Phase 3):**
+
+8. **`output/types.ts`** — add `onStepProgress?` to `Reporter` interface
+9. **`output/reporter.ts`** — implement `onStepProgress`, add `verbose` constructor option
+10. **`agent/agent-runner.ts`** — add `onStepFinish?` to config, wire into `generateText`
+11. **`runner/test-executor.ts`** — thread `onStepFinish` from constructor through `executeAgentFn`
+12. **`cli.ts` verbose wiring** — pass `verbose`/`onStepFinish` to reporter and executor
+
+**Summary build order table:**
+
+| Step | File | Feature | Depends On |
+|------|------|---------|-----------|
+| 1 | `cache/cache-manager.ts` | Cache normalization | nothing |
+| 2 | `cli.ts` catch block | Exit codes 0/1/2 | nothing |
+| 3 | `src/infra/preflight.ts` | Preflight (new file) | nothing |
+| 4 | `cli.ts` preflight call | Preflight wiring | step 3 |
+| 5 | `cli.ts` option + filter | `--only` flag | nothing |
+| 6 | `cli.ts` + `test-executor.ts` | `--no-cache` flag | nothing |
+| 7 | `runner/types.ts` | TestSource `"dry-run"` | nothing |
+| 8 | `cli.ts` + `reporter.ts` | `--dry-run` flag | step 7 |
+| 9 | `output/types.ts` | Reporter interface | nothing |
+| 10 | `output/reporter.ts` | Verbose reporter | step 9 |
+| 11 | `agent/agent-runner.ts` | `onStepFinish` hook | nothing |
+| 12 | `runner/test-executor.ts` | Thread `onStepFinish` | step 11 |
+| 13 | `cli.ts` verbose wiring | `--verbose` flag | steps 10, 12 |
+
+---
+
+## Architectural Patterns for v0.2
+
+### Pattern: Flag Options Object Instead of Individual Parameters
+
+As new flags accumulate, passing them individually into constructors becomes unwieldy. `TestExecutor` will need `noCache` and `onStepFinish`; `ConsoleReporter` needs `verbose`. Use an options object from the start:
+
 ```typescript
-const { text, steps } = await generateText({
-  model: provider(config.model),
-  tools: wrappedMcpTools,
-  system: buildSystemPrompt(testCase, baseUrl),
-  prompt: `Execute the test case: "${testCase}"`,
-  maxSteps: config.maxSteps ?? 50,
-});
-const passed = text.includes("TEST_PASSED");
-// steps contains all tool calls for recording
+// Before (v1.0):
+new TestExecutor({ cacheManager, replayer, executeAgentFn, model, tools, config, globalContext })
+
+// After (v0.2) — extend the existing options object:
+new TestExecutor({
+  cacheManager, replayer, executeAgentFn, model, tools, config, globalContext,
+  noCache?: boolean,
+  onStepFinish?: (toolName: string, stepNumber: number) => void,
+})
 ```
 
-### Pattern 4: Per-Test MCP Client Isolation
+This avoids breaking changes to the constructor signature — all new options are optional with sensible defaults.
 
-**What:** Create a new MCP client (and thus a new `@playwright/mcp` child process) for each test case. Tear it down in `finally` after the test completes.
+### Pattern: Runtime Options Separate from Config Schema
 
-**When to use:** Always. Browser state must not leak between test cases.
+None of the new flags (`--dry-run`, `--verbose`, `--no-cache`, `--only`) belong in `config/schema.ts` (the YAML config). They are invocation-time options, not project-level configuration. Keep them CLI-only:
 
-**Trade-offs:** Startup overhead per test (~1-2s for browser launch). Isolation is guaranteed. Alternative (shared client with page reset) risks cross-test contamination.
+- `config/schema.ts` — unchanged
+- `cli.ts` Commander options — where flags live
+- Passed as constructor options into downstream modules
 
-## Data Flow
+This means existing YAML config files are fully backward compatible with v0.2.
 
-### First-Run Flow (Cache Miss — AI Path)
+### Pattern: Thin `cli.ts` as Feature Aggregation Point
 
-```
-User: superghost --config tests.yaml
-          |
-          v
-    Config Loader ─── YAML + Zod ──→ Config object
-          |
-          v
-    TestRunner.run()
-          |
-          └── for each test:
-                |
-                v
-          TestExecutor.execute(testCase, baseUrl)
-                |
-                v
-          CacheManager.load() ──→ null (miss)
-                |
-                v
-          McpClientFactory.create() ──→ spawn @playwright/mcp (stdio)
-                |
-                v
-          StepRecorder wraps MCP tools
-                |
-                v
-          generateText(model, wrappedTools, systemPrompt)
-                |
-                ├── [tool call] browser_navigate → MCP → Playwright
-                │       ↑ recorder.record("browser_navigate", input)
-                ├── [tool call] browser_snapshot → MCP → Playwright
-                │       ↑ recorder.record("browser_snapshot", input)
-                ├── [tool call] browser_click → MCP → Playwright
-                │       ↑ recorder.record("browser_click", input)
-                └── [final text] "TEST_PASSED: login successful"
-                |
-                v
-          passed=true → CacheManager.save(testCase, baseUrl, steps)
-                |
-                v
-          TestResult { status: "passed", source: "ai", durationMs }
-                |
-                v
-          Reporter.onTestComplete()
-```
+All five features touch `cli.ts`, but the actual logic lives in the modules closest to the concern:
+- `--only` filtering: 3 lines in `cli.ts` (the filter itself is trivial)
+- `--no-cache`: 1 option to Commander + 1 field in constructor call
+- `--dry-run`: 8-10 lines in `cli.ts` (the entire branch)
+- Preflight: delegated to `infra/preflight.ts`
+- Exit codes: logic moved to explicit `instanceof` checks in catch
 
-### Subsequent-Run Flow (Cache Hit — Replay Path)
+`cli.ts` remains a wiring file, not a logic file. New features add wiring, not business rules.
 
-```
-TestExecutor.execute(testCase, baseUrl)
-      |
-      v
-CacheManager.load() ──→ CacheEntry { steps: [...] }
-      |
-      v
-McpClientFactory.create() ──→ spawn @playwright/mcp (stdio)
-      |
-      v
-StepReplayer.replay(steps)
-      |
-      ├── executor("browser_navigate", {url:"..."}) ──→ MCP ──→ Playwright
-      ├── executor("browser_snapshot", {}) ──→ MCP ──→ Playwright
-      └── executor("browser_click", {selector:"..."}) ──→ MCP ──→ Playwright
-      |
-      v
-  success=true → TestResult { status: "passed", source: "cache" }
-```
+---
 
-### Stale Cache Flow (Cache Hit — Replay Fails — AI Re-executes)
+## Anti-Patterns to Avoid
 
-```
-StepReplayer.replay(steps) ──→ ReplayResult { success: false, failedStep: 2 }
-      |
-      v
-[fall through to AI path]
-      |
-      v
-generateText(...) ──→ TEST_PASSED: ...
-      |
-      v
-CacheManager.save() ──→ overwrites stale cache with new steps
-```
+### Anti-Pattern 1: Adding CLI Flags to YAML Config Schema
 
-### Key Data Flows
+**What people do:** Add `dry_run`, `verbose`, `no_cache` fields to `ConfigSchema` and `config/types.ts`.
 
-1. **Config → Runner → Executor:** Config object flows down as read-only dependency, never mutated after construction.
-2. **MCP tool calls → StepRecorder → CacheEntry:** Tool invocations recorded as `{toolName, toolInput}` pairs, serialized to JSON. Input must be serializable — no functions or Buffers in tool inputs.
-3. **CacheEntry → StepReplayer → MCP:** Deserialized steps re-executed in-order. The replayer is a pure sequential executor — no AI model involved.
-4. **TestResult → Reporter:** Reporter receives events, not the raw TestResult, keeping output concerns decoupled from execution state.
+**Why it's wrong:** Run-time invocation flags do not belong in project-level configuration files. This forces users to edit their YAML for every run mode, leaks CLI concerns into the config module, and makes config files harder to share across team members with different preferences.
 
-## Scaling Considerations
+**Do this instead:** CLI flags stay in Commander options in `cli.ts`. Config schema stays for project-level settings (browser type, model, baseUrl, timeout, etc.).
 
-| Scale | Architecture Adjustments |
-|-------|--------------------------|
-| 1-20 tests | Sequential execution is fine. Single CLI process. |
-| 20-100 tests | Sequential is the bottleneck. Consider test-level concurrency (independent browser contexts per worker). Cache I/O remains negligible. |
-| 100+ tests | Parallel workers with shared cache directory (Bun.file writes are atomic on most OSes). AI calls naturally parallelize. Browser spawn becomes a pool concern. |
+### Anti-Pattern 2: Implementing Verbose Output by Logging Inside Agent Modules
 
-### Scaling Priorities
+**What people do:** Add `console.log("[step]", toolName)` directly inside `executeAgent` or `StepRecorder.wrapTools()`.
 
-1. **First bottleneck:** AI execution latency (~10-60s per test). Cache hits eliminate this. Warm caches make 100-test suites run in under a minute.
-2. **Second bottleneck:** Sequential test iteration. `TestRunner` is the natural parallelism boundary — add a worker pool wrapping `TestExecutor` without changing downstream components.
+**Why it's wrong:** Hard-codes output to stdout regardless of verbose flag, bypasses the `Reporter` abstraction, makes output untestable, and breaks non-TTY (CI) output modes.
 
-## Anti-Patterns
+**Do this instead:** Route step progress through `Reporter.onStepProgress()`. The reporter already handles TTY detection (via picocolors + nanospinner). Verbose output is a presentation concern.
 
-### Anti-Pattern 1: Sharing a Browser Context Across Tests
+### Anti-Pattern 3: Preflight Check Inside TestRunner
 
-**What people do:** Reuse a single `@playwright/mcp` process for all tests to avoid spawn overhead.
+**What people do:** Add `await this.checkBaseUrl()` at the top of `TestRunner.run()`.
 
-**Why it's wrong:** Browser state (cookies, localStorage, page history) leaks between tests. A test that logs in contaminates the next test that expects an unauthenticated state. Failures become non-deterministic and hard to diagnose.
+**Why it's wrong:** Preflight failure should exit with code 2 before MCP servers are even spawned. Putting it in `TestRunner` means MCP startup already happened. Also, `TestRunner` should own test iteration, not infrastructure health checks.
 
-**Do this instead:** Spawn a fresh MCP client per test case. Accept the ~1-2s startup cost — it's dwarfed by AI execution time, and cache replay still starts a fresh browser (but runs in seconds).
+**Do this instead:** Preflight in `cli.ts`, before `mcpManager.initialize()`. It's a startup concern in the same category as `validateApiKey()`.
 
-### Anti-Pattern 2: Recording Tool Call Results in the Cache
+### Anti-Pattern 4: Per-Test Preflight Checks
 
-**What people do:** Cache both the tool inputs AND the results (e.g., snapshot HTML, screenshots) to speed up replay.
+**What people do:** Check reachability before every test case to handle the case where the server goes down mid-run.
 
-**Why it's wrong:** Results contain dynamic content (timestamps, session tokens, pixel data) that invalidates on every run. The cache becomes a liability, not an asset. The reference implementation proves that replaying only inputs against a live browser is both correct and fast.
+**Why it's wrong:** Adds 5s overhead per test. Mid-run failures already surface as test failures (AI agent can't navigate to baseUrl, test fails). The preflight is a startup sanity check, not a runtime health monitor.
 
-**Do this instead:** Cache only `{ toolName, toolInput }` pairs. Replay executes them against a real browser, getting fresh results each time. This is the reason cache replay is reliable even when the app changes slightly — tool inputs (selectors, URLs) are stable; results are not.
+**Do this instead:** Single preflight at startup, checking only `config.baseUrl`. Per-test `baseUrl` overrides are user-controlled and can fail as test failures.
 
-### Anti-Pattern 3: Using a Stateful Agent Framework (LangGraph Pattern)
-
-**What people do:** Import LangChain/LangGraph to get a ReAct agent with built-in loop management, tool binding, and state graphs.
-
-**Why it's wrong for SuperGhost:** Heavy dependency tree, Node.js-only assumptions, incompatible with Bun-native compilation target. LangGraph's graph state is overkill for a linear tool-calling loop. The reference implementation shows this: the entire agent is 100 lines of `createReactAgent` wrapping that Vercel AI SDK's `generateText` replaces with ~20 lines.
-
-**Do this instead:** Use `generateText` from `ai` (Vercel AI SDK) with `maxSteps`. The `steps` array on the result gives the complete tool call history. No graph, no state machine, no LangChain.
-
-### Anti-Pattern 4: Global Config Singleton
-
-**What people do:** Export a global `config` object initialized at module load time, accessed directly by any module.
-
-**Why it's wrong:** Breaks testability — you cannot inject different configs for unit tests without module-level hacks. Side effects at import time cause problems in Bun's module system.
-
-**Do this instead:** Pass `Config` as a constructor argument or function parameter. The reference implementation demonstrates this correctly — every class accepts config in its constructor, making tests trivial.
-
-### Anti-Pattern 5: Parsing AI Response with Regex
-
-**What people do:** Search for `TEST_PASSED` anywhere in the response body, including in tool call outputs that get echoed back.
-
-**Why it's wrong:** False positives. If a page contains the text "TEST_PASSED" in its HTML, the snapshot tool returns it, and the AI may echo it in reasoning before the final verdict.
-
-**Do this instead:** Only inspect the final text message from `generateText`, not intermediate steps. The AI SDK's `text` return value contains only the model's final text output, not tool results.
+---
 
 ## Integration Points
 
-### External Services
+### Internal Boundaries (v0.2 Changes)
 
-| Service | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| `@playwright/mcp` | Child process via stdio MCP transport | Spawned per test, killed on cleanup. Use `createMCPClient({ transport: { type: "stdio", command: "bunx", args: ["@playwright/mcp", "--headless"] } })` |
-| Anthropic API | Vercel AI SDK `@ai-sdk/anthropic` provider | `ANTHROPIC_API_KEY` env var |
-| OpenAI API | Vercel AI SDK `@ai-sdk/openai` provider | `OPENAI_API_KEY` env var |
-| Google Gemini | Vercel AI SDK `@ai-sdk/google` provider | `GOOGLE_GENERATIVE_AI_API_KEY` env var |
-| OpenRouter | Vercel AI SDK `@openrouter/ai-sdk-provider` | `OPENROUTER_API_KEY` env var |
-| curl MCP server | Child process via stdio (same pattern as Playwright MCP) | For API test detection path; optional in MVP |
+| Boundary | v1.0 Communication | v0.2 Change |
+|----------|-------------------|-------------|
+| `cli.ts` → `TestExecutor` | Constructor options object | Add `noCache`, `onStepFinish` fields |
+| `cli.ts` → `ConsoleReporter` | No options (simple constructor) | Add `verbose` option |
+| `cli.ts` → `TestRunner` | Injected `executeFn` | Dry-run replaces `executeFn` with stub |
+| `TestExecutor` → `executeAgent` | Config object | Add `onStepFinish?` callback field |
+| `executeAgent` → `generateText` | Direct call | Add `onStepFinish` Vercel AI SDK callback |
+| `cli.ts` → `infra/preflight.ts` | (new) | Direct function call, throws `PreflightError` |
 
-### Internal Boundaries
+### Exit Code Contract
 
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `cli.ts` ↔ `config/loader.ts` | Direct function call, throws `ConfigLoadError` | Loader never imports CLI |
-| `runner/` ↔ `agent/` | Injected function (`executeTest`) — no direct import | Runner does not know about AI SDK |
-| `runner/` ↔ `cache/` | Injected via `CacheManager` instance | Runner does not import cache directly |
-| `agent/` ↔ `cache/StepRecorder` | Recorder passed into AgentRunner | Recorder is a collaborator, not a dependency |
-| `cache/StepReplayer` ↔ `agent/mcp-client.ts` | `ToolExecutor` function type | Replayer gets a function, not an MCP client object |
-| All modules ↔ `output/reporter.ts` | Reporter interface (event callbacks) | Concrete reporter injected at CLI level |
+| Code | Condition | Where Set |
+|------|-----------|-----------|
+| `0` | All tests passed | `cli.ts` success path: `result.failed > 0 ? 1 : 0` |
+| `1` | One or more tests failed | `cli.ts` success path: `result.failed > 0 ? 1 : 0` |
+| `2` | Config error, missing API key, preflight failure, runtime error | `cli.ts` catch block |
 
-## Build Order Implications
-
-Components have a strict dependency direction: `config` → `cache` → `agent` → `runner` → `cli`. Each layer depends only on layers below it, enabling bottom-up development and testing.
-
-**Suggested build sequence:**
-
-1. **`config/`** — Pure Zod schema + YAML loader. No external dependencies beyond `yaml` and `zod`. Testable immediately.
-2. **`cache/`** — File I/O + hashing. Depends only on Bun APIs. `StepRecorder` and `StepReplayer` are the most testable units in the system.
-3. **`output/`** — Console reporter. No dependencies. Can be built in parallel with cache.
-4. **`agent/mcp-client.ts`** — MCP stdio transport setup. Depends on `ai` package. Manually testable against live `@playwright/mcp`.
-5. **`agent/model-factory.ts`** + **`agent/prompt.ts`** — Pure functions. Testable in isolation.
-6. **`agent/agent-runner.ts`** — Assembles model + MCP tools + recorder. Integration test with live AI.
-7. **`runner/test-executor.ts`** — Wires cache + agent. Unit-testable with mocked agent and cache.
-8. **`runner/test-runner.ts`** — Sequential iteration. Trivially testable with mock executor.
-9. **`cli.ts`** — Wires everything. End-to-end testable last.
+---
 
 ## Sources
 
-- Vercel AI SDK MCP docs: https://ai-sdk.dev/docs/ai-sdk-core/mcp-tools (HIGH confidence)
-- Vercel AI SDK tool calling: https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling (HIGH confidence)
-- Vercel AI SDK agents: https://sdk.vercel.ai/docs/foundations/agents (HIGH confidence)
+- Vercel AI SDK `generateText` `onStepFinish` callback: https://sdk.vercel.ai/docs/ai-sdk-core/generating-text (HIGH confidence — confirmed in official docs, parameter is `onStepFinish: (step: StepResult) => void`)
+- SuperGhost v1.0 source: direct inspection of `src/` (HIGH confidence)
+- Bun `fetch` with `AbortSignal.timeout`: https://bun.sh/docs/api/fetch (HIGH confidence — Bun supports Web API `AbortSignal.timeout()`)
 
 ---
-*Architecture research for: AI-powered E2E browser testing CLI tool (SuperGhost)*
-*Researched: 2026-03-10*
+
+*Architecture research for: SuperGhost v0.2 DX feature integration*
+*Researched: 2026-03-11*

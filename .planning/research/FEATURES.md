@@ -1,8 +1,20 @@
 # Feature Research
 
-**Domain:** AI-powered E2E browser + API testing CLI tool
-**Researched:** 2026-03-10
-**Confidence:** HIGH (reference implementation inspected directly; competitor feature sets verified via official sites and WebSearch)
+**Domain:** AI-powered E2E browser + API testing CLI tool — DX Polish (v0.2)
+**Researched:** 2026-03-11
+**Confidence:** HIGH (competitor CLIs inspected via official docs; existing codebase read directly; UX conventions verified across Jest, Vitest, Playwright, Cypress)
+
+---
+
+## Context: What This File Is
+
+This FEATURES.md is an **addendum** for the v0.2 milestone. v1.0 features are already implemented and documented in the previous research file. This file focuses exclusively on the five DX polish features in the current milestone:
+
+1. CLI flags: `--dry-run`, `--verbose`, `--no-cache`, `--only <pattern>`
+2. Preflight `baseUrl` reachability check
+3. Real-time step progress output during AI execution
+4. Distinct exit codes: 0 = pass, 1 = test failure, 2 = config/runtime error
+5. Cache key normalization (whitespace/formatting-insensitive)
 
 ---
 
@@ -10,146 +22,128 @@
 
 ### Table Stakes (Users Expect These)
 
-Features users assume exist. Missing these = product feels incomplete or broken.
+These are UX behaviors users of CLI testing tools take for granted. Absence makes SuperGhost feel like a prototype.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Plain English test cases | The entire value prop. Users come because they don't want to write Playwright code. | LOW | `case: "check login is working"` in YAML. Proven pattern in natural language E2E testing tools like testRigor, KaneAI. |
-| YAML config, zero code | Aligns with how AI-native teams configure tools. Matches competitor norms. | LOW | Zod validation required. Per-test overrides for `baseUrl` and `timeout` add real value. |
-| CI/CD exit codes (0 / 1) | Without correct exit codes the tool can't be used in any pipeline. Users will drop it immediately. | LOW | Exit 0 = all pass, exit 1 = any fail or config error. Non-negotiable for pipeline integration. |
-| Deterministic summary output | Teams need to read results in logs. Pass/fail/timing per test + summary row. | LOW | SuperGhost output format: `[PASS]`, `[FAIL]` with source (cache/ai) and timing. |
-| Browser test execution via real browser | "Real browser" is the key trust signal. Headless Chromium minimum; Playwright MCP is the proven mechanism. | MEDIUM | Playwright MCP (`@playwright/mcp`) handles navigation, click, type, snapshot via MCP protocol. |
-| Auto-detect API vs browser tests | Users write both types of tests in one config. Auto-detection based on natural language description avoids per-test flags. | MEDIUM | HTTP verbs (GET, POST) or URL-pattern descriptions trigger API path via curl MCP. |
-| Configurable browser (chromium/firefox/webkit) | QA teams expect multi-browser targeting even if chromium is default. | LOW | Three options match what Playwright supports: `chromium`, `firefox`, `webkit`. |
-| Headless mode toggle | Required for debugging. `headless: false` lets devs watch the browser run. | LOW | Boolean flag; default `true` for CI, `false` for local debugging. |
-| Per-test timeout + global timeout | Long-running tests break short-running suites without this. Inherited-plus-override pattern is idiomatic. | LOW | Global default 60s; per-test override in YAML. |
-| Multi-provider LLM support | Teams use different API providers. Being locked to a single provider is a blocker for enterprise users and a frequent complaint against tools with hard vendor coupling. | MEDIUM | SuperGhost targets Anthropic, OpenAI, Gemini, OpenRouter via Vercel AI SDK. |
-| Max retries / attempt limit | AI agents fail intermittently. Without retry logic, flaky AI responses cause false test failures. | LOW | `maxAttempts: 3` (1–10 range). Log each failure reason. |
-| Error messages on failure | Users must know WHY a test failed, not just THAT it failed. | LOW | Print the AI's last failure reason from the test step. SuperGhost prints the agent's diagnostic message. |
+| `--dry-run` flag (list tests, no execution) | Every serious test CLI has a way to preview what will run without running it. Jest `--listTests`, Playwright `--list`, Vitest `vitest list` all do this. Users expect it for large suites or pipeline debugging. | LOW | Output: numbered list of test names + their type (browser/api). No MCP spawn, no AI call, no cache read. Exit code 0. Works with `--only` filter. |
+| `--verbose` flag (detailed step-level output) | Debugging a failing AI test with only a spinner + final result is opaque. Users need to see what the AI is doing. Playwright `--reporter=verbose`, Jest `--verbose`, Vitest `--reporter=verbose` all increase output fidelity. | MEDIUM | In verbose mode: print each MCP tool call as it happens (tool name + truncated args), print AI model, print cache hit/miss before each test, print full error trace on failure. nanospinner already present — falls back to plain-text line-per-step in verbose mode (spinners conflict with multi-line output). |
+| `--no-cache` flag (bypass all cache) | Docker `docker build --no-cache`, npm `npm ci --no-cache`, Turborepo `--no-cache` — the convention is universal. Users expect this for debugging stale behavior or forcing a fresh AI run. | LOW | Skip `CacheManager.load()` entirely; do not skip `CacheManager.save()` after successful AI run (so the next run re-populates cache). This distinction matters: `--no-cache` means "don't read from cache this run," not "never cache again." |
+| `--only <pattern>` filter (subset of tests) | Jest `-t "pattern"`, Playwright `--grep pattern`, Vitest `-t pattern` — all use a pattern (string or regex) to select which tests run. Users with 20+ tests need this to iterate on one failing test. | LOW | Pattern matches against `test.name` (the display name field in YAML). Substring match is sufficient — no need for full regex unless users request it. Print "Skipping X tests (--only filter)" before running. Exit code 2 if pattern matches zero tests (misconfiguration, not test failure). |
+| Preflight `baseUrl` reachability check | Playwright's `webServer` config pings baseUrl before starting tests. Cypress recommends `wait-on` in CI. Users expect the tool to fail fast with a clear error if the server is down, rather than spending 10+ seconds on AI calls that all fail with connection errors. | LOW | HTTP GET with short timeout (5s). Check once before any tests start. If unreachable: print actionable error (`baseUrl https://... is not reachable — is your server running?`), exit code 2. Skip check if no `baseUrl` configured. |
+| Real-time progress during AI execution | The existing spinner only shows test name. For a 30-second AI run, there is no feedback on what the agent is doing. Playwright shows each step in verbose mode; Vitest shows assertions as they pass. Users feel anxious watching a static spinner for 30s. | MEDIUM | Print each tool call as it happens (before result): `  > navigate(url=...)`, `  > snapshot()`, `  > click(...)`. Requires hooking into the agent's tool execution callback. The Vercel AI SDK `onStepFinish` callback is the right integration point. |
+| Distinct exit code for config errors | POSIX convention: exit 2 = bad usage/invalid arguments. Bash itself uses exit 2. curl uses exit 2 for init failures. Tools that use exit 1 for both test failures and config errors make CI pipelines impossible to instrument (you can't distinguish "tests failed, re-run" from "your pipeline is broken"). | LOW | Currently: `ConfigLoadError` → exit 1. Missing API key → exit 1. Same code as test failure. Change: all pre-execution failures (config load error, missing API key, zero tests matched by filter, baseUrl unreachable) → exit 2. Test failures remain exit 1. |
+| Cache key normalization | A test case written as `"  Check that login  works "` should hit the same cache as `"Check that login works"`. Whitespace differences from copy-paste or editor formatting causing cache misses is a paper-cut that erodes trust. | LOW | Normalize cache key input: `testCase.trim().replace(/\s+/g, ' ')` before hashing. Apply same normalization to `baseUrl` (trim only). Update `CacheManager.hashKey()`. Existing cache entries are compatible if normalized — no migration needed for new entries. |
 
 ---
 
 ### Differentiators (Competitive Advantage)
 
-Features that set the product apart from raw browser automation tools and from cloud-hosted testing platforms.
+Features that are not universal expectations but give SuperGhost a better UX than competitors in specific scenarios.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Step caching with ~50ms replay | Makes AI-driven testing viable for CI/CD at scale. Without this, 30 tests at 10s each = 5 minutes. With caching, 30 tests at 50ms each = 1.5 seconds. This is the core moat. | HIGH | SHA-256 hash of `(case + baseUrl)` as cache key. Stored as JSON in `.superghost-cache/`. Cache-first, fallback to AI. |
-| Self-healing cache | When the UI changes, stale cache is detected and AI automatically re-executes and updates the cache. Users never manually maintain tests. | HIGH | Cache replay fails → AI re-runs → if AI passes, cache updated; if AI fails, cache deleted. This is the "auto-maintenance" story. |
-| Cache invalidation on description change | Changing the test case wording automatically busts the cache. Users never accidentally run stale tests against changed intent. | LOW | Hash includes the case string. Rename the case = fresh AI run. Builds user trust. |
-| Human-readable cache files | Cache stored as JSON with `testCase`, `baseUrl`, `steps` array. Developers can inspect and reason about what the AI decided to do. | LOW | Helps debugging. Contrast with black-box caching in other tools. |
-| Configurable cache directory | Teams can put cache in `.gitignore` or version-control a shared cache as a strategy choice. | LOW | `cacheDir` config option. Default `.superghost-cache/`. |
-| Bun-native compiled binary | `bunx superghost` with no install. Also distributes as a standalone compiled binary via `bun build --compile`. No Node.js required. | MEDIUM | Faster startup than Node. Aligns with modern TS toolchain. Standalone binary simplifies CI runner setup. |
-| Source attribution in output | Each test result shows whether it ran via `cache` or `ai`. Teams can see exactly how fast/slow their suite is and which tests need warm-up. | LOW | `[PASS] check login (cache, 45ms)` vs `[PASS] check login (ai, 8.2s)`. Builds trust in the tool. |
-| OpenRouter support | Lets users route to any model from a single API key. Useful for cost optimization, model experimentation, and teams already on OpenRouter. | LOW | Vercel AI SDK supports OpenRouter out of the box. Low implementation cost, high user value. |
+| `--dry-run` combined with `--only` filter | Playwright and Jest support these independently but their interaction is not always well-defined. SuperGhost's dry-run should respect `--only` — show exactly what would run given the current filter. | LOW | Compose naturally: filter tests by pattern first, then list. Prevents "I thought --only would run 3 tests" surprises. |
+| Verbose mode that falls back gracefully in non-TTY | Tools like Jest use raw `console.log` in non-TTY (CI pipes). SuperGhost should detect non-TTY and emit clean, structured lines (no ANSI codes via picocolors auto-disable, no spinner via nanospinner auto-disable). Verbose mode in CI should produce parseable per-step lines. | LOW | Already handled: picocolors disables ANSI when stdout is not a TTY. nanospinner disables animation in non-TTY. The verbose output lines just need to be `console.log` calls. |
+| Preflight error that names the test it would have blocked | Rather than just "baseUrl is unreachable," list which tests were going to use that baseUrl. Helps users understand scope of failure in suites with mixed baseUrls. | MEDIUM | Only worth doing if per-test baseUrl overrides exist (they do — schema supports `test.baseUrl`). Check per-test baseUrls too, not just global. Report unique set of unreachable URLs with count of tests affected. |
+| `--no-cache` re-populates cache after fresh AI run | Most tools treat `--no-cache` as "this run is ephemeral." SuperGhost's cache is a long-term test maintenance artifact. Refreshing it on `--no-cache` runs is correct behavior — you want the cache accurate after a forced fresh run. | LOW | This is an opinionated distinction from Docker/npm. Make it explicit in CLI help text: "Skips reading cache; still writes on success." |
+| Exit code 2 for zero test matches on `--only` | Jest exits 0 if no tests match a pattern (produces a warning). Playwright exits 0 if `--grep` matches nothing. This is silently wrong in CI — your filter regex has a typo and no tests run, pipeline goes green. SuperGhost should exit 2. | LOW | Check: if `--only` is specified and matched tests array is empty → exit 2 with error message. This is the right behavior that tools like Jest get wrong. |
 
 ---
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
-Features that seem like natural extensions but create more problems than they solve for a v1 CLI tool.
+Features that seem like natural next steps for this milestone but should be deferred or avoided.
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| GUI / Dashboard | "I want to see results visually." | Adds a full web product on top of a CLI tool. Doubles scope, requires auth, hosting, data storage. Distracts from the core value of simplicity. | Rich terminal output with pass/fail/timing. Pipe output to existing dashboards (Datadog, Grafana) via exit codes and stdout. |
-| Parallel test execution | "My suite is slow, run tests in parallel." | Browser contexts at scale require resource management. Parallel AI calls multiply LLM cost and rate-limit risk. Sequential determinism is easier to reason about in CI logs. | Implement sequential first. Step caching achieves ~50ms per cached test, which is fast enough for most suites. Parallel execution is a v2 feature after sequential is rock-solid. |
-| Visual regression testing | "Check if the page looks different." | Requires screenshot diffing, pixel comparison, baseline management, and a separate review workflow. Completely different domain from functional E2E testing. | AI-powered functional assertions already verify "the page looks right" implicitly. Dedicated tools (Percy, Chromatic) do visual regression better. |
-| Test generation from app crawling | "Auto-discover what to test by crawling the app." | Crawler-generated tests are low signal. They don't express intent. They break on layout changes. Users end up curating generated tests anyway — they may as well write them. | Users write test cases in plain English. The constraint is the feature: authored tests express intent, not just reachable states. |
-| Cloud-hosted execution | "Run my tests in your cloud." | Infrastructure, billing, security, multi-tenancy. Turns a tool into a SaaS product. | Local/CI runner covers the primary use case. Users bring their own runner (GitHub Actions, CircleCI, etc.). |
-| Test tags / groups / suites | "I want to run only smoke tests." | Config schema complexity grows fast. Users end up learning a mini DSL instead of writing tests. | v1: run all tests. v2: `--config smoke-tests.yaml`. Multiple config files solve the use case without schema complexity. |
-| Slack / webhook notifications | "Alert me when tests fail." | CI/CD already handles this. GitHub Actions notifies on pipeline failure. Adding notifications duplicates existing infrastructure. | Exit code 1 is the notification. Teams integrate with their existing alerting via pipeline failure hooks. |
-| Per-step assertions in YAML | "I want to assert X at step 3." | Turns the config into a test programming language. The AI already implicitly asserts based on the test description. Explicit step assertions duplicate the AI's job. | Write a more specific natural language case: "verify that the success message appears after submitting the form." The AI will assert it. |
+| `--watch` mode | "Re-run tests on config change." | Watch mode requires a file watcher loop, signal handling for restart, TTY manipulation for re-draw. This is a separate feature of similar complexity to this entire milestone. | v2 milestone. Use `nodemon --exec "superghost --config tests.yaml"` as a workaround in the meantime. |
+| `--bail` / fail-fast after N failures | Jest `--bail`, Playwright `--max-failures`. Users with 50 tests don't want to wait for all failures. | Bail logic interacts badly with cache — a bailed run leaves the cache partially populated. For a 5-feature DX milestone, bail adds cross-cutting complexity to the runner. | Sequential execution already fails fast implicitly (each test blocks the next). For now, exit 1 after all tests run. |
+| JSON/JUnit output mode (`--output json`) | CI reporting, piping to dashboards. | JSON output is a reporter refactor, not a DX flag. It changes the output contract for all consumers. The current human-readable format already has CI-useful exit codes. | Defer to a "reporting" milestone. The summary box output is already parseable for humans. |
+| Full regex matching for `--only` | "I want complex test selection with lookaheads." | Regex in CLI args causes shell quoting hell. Most users want substring match, not regex. Jest uses `--testNamePattern` with regex but it's frequently misused (users forget to escape). | Substring match covers 95% of use cases. Document clearly. If regex is needed, users can quote patterns appropriately since JavaScript `String.includes()` is the default. |
+| `--clear-cache` as a separate flag | "I want to delete all cached test results." | This is a destructive operation on what may be committed CI artifacts. It's better as a one-time `rm -rf .superghost-cache/` than a built-in flag that could accidentally nuke a shared cache. | Documented in README. `--no-cache` covers the "force fresh run" use case without deleting files. |
+| Preflight check for API test endpoints | "Check if each API baseUrl is reachable." | API tests may use dynamic endpoints or may test error states (intentionally unreachable endpoints). A preflight check on API test URLs would produce false positives. | Only preflight-check `config.baseUrl` (global browser test base). Let per-test API failures surface as test failures with clear error messages. |
+| Token/cost tracking in verbose output | "Show how many tokens this run used." | Requires Vercel AI SDK usage tracking per `generateText` call, plus per-provider cost tables that drift over time. This is a full "observability" feature, not a DX polish item. | Defer. Track `usage.totalTokens` from `generateText` result and surface it post-v0.2. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[YAML Config + Zod Validation]
-    └──requires──> [CLI Entry Point]
-                       └──requires──> [AI Agent (Vercel AI SDK)]
-                                          ├──requires──> [Playwright MCP (browser tests)]
-                                          └──requires──> [curl MCP (API tests)]
+[--dry-run flag]
+    └──requires──> [config loader] (must parse YAML to list test names)
+    └──enhances──> [--only filter] (dry-run respects filter, shows what would run)
+    └──conflicts──> [MCP spawn] (dry-run must NOT start Playwright MCP)
 
-[Step Caching]
-    └──requires──> [AI Agent] (cache stores what AI decides to do)
-    └──requires──> [SHA-256 Cache Key] (deterministic hash of case + baseUrl)
+[--only <pattern> filter]
+    └──requires──> [config loader] (needs test list to filter)
+    └──enhances──> [TestRunner.run()] (runner skips non-matching tests)
+    └──enhances──> [--dry-run] (filter applied before listing)
 
-[Self-Healing]
-    └──requires──> [Step Caching] (nothing to heal if no cache)
-    └──requires──> [AI Agent] (AI re-runs on cache failure)
+[--no-cache flag]
+    └──requires──> [CacheManager] (bypasses CacheManager.load(), keeps CacheManager.save())
+    └──conflicts──> [--dry-run] (dry-run never reads cache either, but for different reason)
 
-[Auto-detect API vs Browser]
-    └──requires──> [AI Agent] (agent selects tool set based on test description)
-    └──requires──> [Playwright MCP + curl MCP both configured]
+[--verbose flag]
+    └──requires──> [agent step hooks] (needs onStepStart/onStepFinish callbacks from agent-runner)
+    └──enhances──> [ConsoleReporter] (adds per-step lines between spinner events)
+    └──conflicts──> [nanospinner] (spinner animation must be suppressed in verbose mode — multi-line output breaks spinner redraw)
 
-[Multi-provider LLM]
-    └──requires──> [Vercel AI SDK] (provider abstraction layer)
-    └──enhances──> [AI Agent] (swap model without changing agent code)
+[Preflight baseUrl check]
+    └──requires──> [config loader] (needs baseUrl from config before running)
+    └──requires──> [--dry-run exclusion] (preflight should NOT run in dry-run mode)
+    └──enhances──> [exit code 2] (unreachable baseUrl is a config/runtime error, not a test failure)
 
-[CI/CD Exit Codes]
-    └──requires──> [Test Runner] (aggregates pass/fail across all tests)
-    └──enhances──> [Summary Output] (exit code + human-readable summary together)
+[Real-time step progress]
+    └──requires──> [agent-runner onStepFinish hook] (needs callback from executeAgent)
+    └──requires──> [--verbose flag] (only visible in verbose mode; default mode keeps spinner-only)
+    └──enhances──> [ConsoleReporter] (reporter needs a new onStepComplete(step) method)
 
-[Compiled Binary (bun build --compile)]
-    └──requires──> [Bun runtime] (bun-specific compilation target)
-    └──enhances──> [CI/CD usage] (no runtime install needed on runner)
+[Exit code 2 for config errors]
+    └──requires──> [ConfigLoadError distinction] (already thrown, needs different exit path)
+    └──enhances──> [preflight check] (unreachable URL exits 2, not 1)
+    └──enhances──> [--only with zero matches] (zero match is exit 2)
 
-[Parallel Execution] ──conflicts──> [Sequential Determinism]
-    (sequential is simpler; parallel adds resource/cost/flakiness complexity)
-
-[GUI Dashboard] ──conflicts──> [CLI-first simplicity]
-    (adding a web UI changes the product category entirely)
+[Cache key normalization]
+    └──requires──> [CacheManager.hashKey()] (normalize input before hashing)
+    └──no conflicts] (pure function change; cache entries with old keys become orphaned but not incorrect)
 ```
 
 ### Dependency Notes
 
-- **Self-healing requires step caching:** Self-healing is a property of the cache lifecycle, not a standalone feature. You cannot implement self-healing without first implementing caching.
-- **Auto-detect requires both MCP servers:** The AI agent selects tools from its tool list. If curl MCP is not configured, API tests silently fall back to browser (or fail). Both must be present.
-- **Multi-provider enhances AI agent:** The agent orchestration code is the same regardless of provider. Multi-provider is an SDK-layer feature, not an agent redesign.
-- **Parallel execution conflicts with sequential determinism:** Sequential execution makes CI logs readable and test isolation trivial. Parallel adds concurrency bugs, rate-limit risk, and resource contention. Defer to v2.
+- **`--verbose` conflicts with nanospinner:** The current `ConsoleReporter` uses nanospinner for a per-test spinner. Spinners work by overwriting the current terminal line. If verbose mode prints multiple lines per test, the spinner will corrupt the output. Solution: when `--verbose` is active, skip spinner creation and use `console.log` with a prefix symbol instead.
+
+- **Real-time step progress requires agent hook:** The `executeAgent` function in `agent-runner.ts` currently runs a full `generateText` call. To emit per-step output, the `onStepFinish` callback in Vercel AI SDK must be used. This callback fires after each AI "step" (tool call + result cycle). The callback signature is `onStepFinish({ toolCalls, toolResults })`.
+
+- **Preflight must not run in dry-run mode:** `--dry-run` is supposed to be safe to run without a server. Preflight check must be conditional on actual execution mode.
+
+- **`--only` zero-match → exit 2, not 1:** This is counterintuitive (it feels like "nothing failed"), but exit 2 is correct because it signals a usage/configuration error — the user passed a pattern that matches nothing, which is almost certainly a mistake. Exit 1 reserved for actual test failures.
+
+- **Cache key normalization is non-breaking:** Existing cache files are keyed by the old (non-normalized) hash. When normalization is applied, old keys become unreachable. The effect is a one-time cold start for any test whose key changes. Self-healing handles this transparently — the AI re-runs and saves under the new normalized key.
 
 ---
 
-## MVP Definition
+## v0.2 Milestone Scope
 
-### Launch With (v1)
+### Build Now (v0.2)
 
-Minimum viable product — what's needed to validate the natural language E2E testing concept.
+These are the five feature areas in the current milestone. All are LOW–MEDIUM complexity and compose cleanly with the existing architecture.
 
-- [x] Plain English test cases via YAML (`case: "..."`) — core value prop
-- [x] Zod-validated YAML config with sensible defaults — `baseUrl`, `browser`, `headless`, `timeout`, `maxAttempts`, `model`, `modelProvider`, `cacheDir`
-- [x] CLI entry point (`superghost --config tests.yaml`) — the interface
-- [x] AI agent executes tests via Playwright MCP (browser) and curl MCP (API) — execution engine
-- [x] Auto-detect API vs browser based on test case description — removes per-test type flags
-- [x] Step caching — SHA-256 hash key, JSON storage, cache-first execution — the performance moat
-- [x] Self-healing — cache replay failure triggers AI re-run, cache update on success, cache delete on failure — the maintenance moat
-- [x] Multi-provider LLM support (Anthropic, OpenAI, Gemini, OpenRouter) via Vercel AI SDK — unblocks enterprise users
-- [x] CI/CD exit codes (0/1) and summary output — required for any pipeline integration
-- [x] Sequential test execution with independent browser contexts per test — safe, simple, debuggable
-- [x] Configurable: browser type, headless mode, timeout, max retries, model, cache dir — matches reference
-- [x] Bun-native distribution: `bunx`, npm package, and standalone compiled binary — modern distribution
+- [ ] `--dry-run` flag — List tests that would run, exit 0. Works with `--only`. Does NOT start MCP, does NOT read cache.
+- [ ] `--verbose` flag — Per-step tool call output during AI execution. Suppresses nanospinner. Uses `onStepFinish` callback from Vercel AI SDK.
+- [ ] `--no-cache` flag — Bypasses `CacheManager.load()`, keeps `CacheManager.save()`. Self-documents: "skips reading cache; still writes on success."
+- [ ] `--only <pattern>` filter — Substring match on `test.name`. Exit 2 if no tests match. Print skipped-test count at run start.
+- [ ] Preflight `baseUrl` HTTP check — GET request with 5s timeout before any test runs. Exit 2 if unreachable. Skip in `--dry-run` mode. Check per-test baseUrls that differ from global.
+- [ ] Real-time step progress — Print `  > toolName(truncated_args)` for each AI step. Gated on `--verbose`. Integrated via `onStepFinish` in agent-runner.
+- [ ] Exit codes 0/1/2 — 0 = all pass, 1 = any test fails, 2 = config error / missing API key / unreachable baseUrl / zero tests matched by filter.
+- [ ] Cache key normalization — `testCase.trim().replace(/\s+/g, ' ')` before SHA-256 hash in `CacheManager.hashKey()`.
 
-### Add After Validation (v1.x)
+### Defer to Later Milestones
 
-Features to add once the core test-run loop is proven.
-
-- [ ] `--no-cache` / `--clear-cache` CLI flags — When users report wanting to force fresh AI runs without deleting the directory manually
-- [ ] `--only <pattern>` flag to run a subset of tests — When users have large suites and need faster iteration on individual tests
-- [ ] Verbose mode (`--verbose`) showing step-level AI actions — When users report difficulty debugging failing tests
-- [ ] JSON output mode (`--output json`) for machine-readable results — When teams want to parse results in scripts or send to monitoring
-- [ ] Per-test `skip` flag in YAML — When users need to temporarily disable tests without deleting them
-
-### Future Consideration (v2+)
-
-Features to defer until product-market fit is established.
-
-- [ ] Parallel test execution — Defer until sequential is proven at scale; adds significant complexity
-- [ ] Watch mode (`--watch`) for re-running on file changes — Nice DX but not a CI/CD concern; requires file watcher
-- [ ] Multiple config file support with shared base config — When users have many test suites with shared settings
-- [ ] Test tagging / grouping — When users need smoke vs regression vs integration test splits
-- [ ] HTML report output — When teams want shareable test reports outside the terminal
+- [ ] `--watch` mode — v3 or later (separate feature of comparable complexity to v0.2)
+- [ ] `--bail` / fail-fast — v0.3 or later (cross-cuts runner + cache lifecycle)
+- [ ] JSON/JUnit output — "Reporting" milestone (reporter refactor)
+- [ ] Token/cost tracking — "Observability" milestone
 
 ---
 
@@ -157,61 +151,109 @@ Features to defer until product-market fit is established.
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| Plain English YAML test cases | HIGH | LOW | P1 |
-| Step caching (~50ms replay) | HIGH | HIGH | P1 |
-| Self-healing cache | HIGH | MEDIUM | P1 |
-| CI/CD exit codes + summary | HIGH | LOW | P1 |
-| AI agent via Playwright MCP | HIGH | MEDIUM | P1 |
-| Auto-detect API vs browser | HIGH | MEDIUM | P1 |
-| Multi-provider LLM support | HIGH | MEDIUM | P1 |
-| Configurable browser/headless/timeout | MEDIUM | LOW | P1 |
-| Bun compiled binary | MEDIUM | LOW | P1 |
-| Source attribution in output (cache/ai) | MEDIUM | LOW | P1 |
-| `--no-cache` / `--clear-cache` flags | MEDIUM | LOW | P2 |
-| `--only` pattern filtering | MEDIUM | LOW | P2 |
-| Verbose / step-level debug output | MEDIUM | LOW | P2 |
-| JSON output mode | LOW | LOW | P2 |
-| Parallel execution | HIGH | HIGH | P3 |
-| Watch mode | LOW | MEDIUM | P3 |
-| HTML report | LOW | MEDIUM | P3 |
-| GUI / Dashboard | MEDIUM | HIGH | Never (v1) |
-| Visual regression testing | LOW | HIGH | Never (v1) |
-| Cloud-hosted execution | LOW | HIGH | Never (v1) |
+| Exit codes 0/1/2 | HIGH | LOW | P1 — changes 3 lines in cli.ts |
+| Cache key normalization | MEDIUM | LOW | P1 — changes 1 function in cache-manager.ts |
+| `--no-cache` flag | HIGH | LOW | P1 — one boolean in TestExecutor.execute() |
+| `--only <pattern>` filter | HIGH | LOW | P1 — filter before TestRunner.run() |
+| `--dry-run` flag | HIGH | LOW | P1 — list tests and exit before MCP spawn |
+| Preflight `baseUrl` check | HIGH | LOW | P1 — single HTTP GET before test loop |
+| Real-time step progress | MEDIUM | MEDIUM | P2 — requires agent hook integration |
+| `--verbose` with suppressed spinner | MEDIUM | MEDIUM | P2 — reporter mode switch + verbose lines |
+
+**Priority key:**
+- P1: Implement first, independent of other P1 features
+- P2: Implement after P1 features are wired; depends on P1 reporter and agent hook work
 
 ---
 
-## Competitor Feature Analysis
+## Competitor CLI Behavior Reference
 
-| Feature | testRigor | Momentic | ZeroStep | SuperGhost |
-|---------|-----------|----------|----------|------------|
-| Plain English test authoring | GUI-based natural language | Low-code editor + NL prompts | Inline NL in Playwright code | YAML `case:` field |
-| Step caching | No (cloud execution, always fresh) | No | No | SHA-256 hash, JSON, ~50ms replay |
-| Self-healing | AI-powered locator healing | Intent-based selectors | Runtime self-correction | Cache lifecycle auto-updates |
-| Multi-provider LLM | Proprietary (no choice) | Proprietary | GPT-3.5/4 only | Vercel AI SDK (Anthropic, OpenAI, Gemini, OpenRouter) |
-| CI/CD exit codes | Yes | Yes | Yes (inherits Playwright) | Yes (0/1) |
-| API testing | Yes | No (web only) | No | Auto-detected via curl MCP |
-| Browser testing | Cloud browsers | Chromium (cloud) | Playwright (local) | Playwright MCP (local) |
-| CLI / code-free | No (requires GUI setup) | No (requires GUI) | No (requires Playwright code) | Yes (`bunx superghost`) |
-| Open source / local runner | SaaS only | SaaS only | Requires ZeroStep cloud API | Open (MIT target), runs locally |
-| Compiled binary | N/A | N/A | N/A | Yes (`bun build --compile`) |
+This table documents the exact behaviors used as reference for SuperGhost's v0.2 DX conventions. These are verified against official documentation.
 
-**Key differentiator from all competitors:** SuperGhost is the only approach that combines plain-English YAML config + step caching + self-healing + local/CI execution without a SaaS dependency. All cloud-hosted competitors (testRigor, Momentic) require account setup, have per-test costs on every run, and cannot run in isolated CI environments. ZeroStep requires existing Playwright code. SuperGhost requires nothing but a YAML file and an LLM API key.
+| Behavior | Jest | Playwright | Vitest | Cypress | SuperGhost v0.2 |
+|----------|------|------------|--------|---------|-----------------|
+| Dry-run / list | `--listTests` (file names only, exits 0) | `--list` (test names + file, exits 0) | `vitest list` (test names, exits 0) | No built-in | `--dry-run`: test names + type, exits 0 |
+| Verbose output | `--verbose` (full test tree hierarchy) | `--reporter=verbose` (per-test steps) | `--reporter=verbose` (per-test output) | No `--verbose`; use `--reporter` | `--verbose`: per-step AI tool calls |
+| Test filtering | `-t "pattern"` (regex on test name) | `--grep pattern` (regex) | `-t pattern` (regex) | `--spec glob` (file-level) | `--only pattern` (substring on test.name) |
+| Cache bypass | N/A (Jest has no step cache) | N/A | N/A | N/A | `--no-cache` (skip read, keep write) |
+| Exit: all pass | 0 | 0 | 0 | 0 | 0 |
+| Exit: test failure | 1 | 1 | 1 | N (number of failures, or 1 with `--posix-exit-codes`) | 1 |
+| Exit: config error | 1 (same as test failure) | 1 | 1 | 1 | **2** (distinct from test failure) |
+| Exit: no tests match filter | 0 (warning printed) | 0 | 0 | 1 | **2** (explicit misconfiguration signal) |
+| Server/preflight check | No | `webServer` option with ping-until-ready | No | `wait-on` pattern (external) | Preflight GET before test loop |
+| Progress during execution | Spinner per test | Step counter per test | Progress bar | Per-test spinner | Per-step tool calls in verbose mode |
+| Non-TTY output | Plain text, no spinner | Plain text | Plain text | Plain text | Auto-detected via picocolors/nanospinner |
+
+**Key divergence from convention:** SuperGhost uses `--only` instead of `--grep`/`-t` because:
+1. SuperGhost test "names" are human-written display names, not function-call identifiers. Substring match (`includes`) is more appropriate than regex for natural-language names.
+2. `--grep` implies regex, which causes shell quoting friction. `--only` is explicit about its purpose.
+3. If users need regex they can always write a regex that works as a substring match (e.g., `--only "login"`).
+
+**Key divergence from convention:** Exit code 2 for zero-match `--only` filter. Jest and Playwright exit 0 for empty filter results. This is a known footgun — green pipelines when your filter typo matches nothing. SuperGhost takes the stricter, more correct position.
+
+---
+
+## Implementation Notes for Roadmap
+
+### cli.ts Changes (Low Risk)
+
+`cli.ts` is the integration point for all five flags. The Commander.js program definition gets four new options:
+- `.option('--dry-run', 'List tests without executing')`
+- `.option('--verbose', 'Show AI step-level output during execution')`
+- `.option('--no-cache', 'Skip cache reads (still writes on AI success)')`
+- `.option('--only <pattern>', 'Only run tests matching pattern (substring)')`
+
+The options object propagates through to TestRunner and TestExecutor.
+
+### Agent Hook Integration (MEDIUM Risk)
+
+`agent-runner.ts` calls `generateText` from Vercel AI SDK. The `onStepFinish` callback is the correct hook for per-step progress. The callback receives `{ toolCalls: ToolCall[], toolResults: ToolResult[], stepType }`. This needs to be passed into `executeAgent` as an optional callback.
+
+Signature change: `executeAgent(config: { ..., onStepFinish?: (step: StepInfo) => void })`
+
+ConsoleReporter gets a new optional method: `onAgentStep(testName: string, toolName: string, truncatedArgs: string): void`
+
+### Exit Code Changes (Low Risk)
+
+Current: `process.exit(1)` for both test failures and config errors.
+
+Change: introduce an `ExitCode` enum or constants:
+```typescript
+const EXIT = { PASS: 0, TEST_FAIL: 1, ERROR: 2 } as const;
+```
+
+Apply `EXIT.ERROR` to: `ConfigLoadError`, missing API key, baseUrl unreachable, zero tests matched by `--only`.
+
+Apply `EXIT.TEST_FAIL` to: `result.failed > 0`.
+
+### Cache Manager Change (Low Risk)
+
+One-line change in `CacheManager.hashKey()`:
+```typescript
+static hashKey(testCase: string, baseUrl: string): string {
+  const normalizedCase = testCase.trim().replace(/\s+/g, ' ');
+  const normalizedUrl = baseUrl.trim();
+  const input = `${normalizedCase}|${normalizedUrl}`;
+  // ... rest unchanged
+}
+```
 
 ---
 
 ## Sources
 
-- [Playwright Test Agents docs](https://playwright.dev/docs/test-agents) — Playwright MCP, agent types (Planner, Generator, Healer)
-- [ZeroStep](https://zerostep.com/) — NL-in-Playwright approach, GPT integration
-- [Momentic](https://momentic.ai) — intent-based selectors, low-code authoring, SaaS model
-- [testRigor vs Mabl comparison](https://testrigor.com/alternative/mabl/) — feature differences in plain-English testing
-- [TestDriver.ai GitHub](https://github.com/testdriverai/cli) — vision-based agent, headless CI mode
-- [Self-Healing Test Automation Guide (Momentic)](https://momentic.ai/blog/self-healing-test-automation-guide) — self-healing patterns
-- [AI E2E Testing paradigm overview (DEV)](https://dev.to/pietrocontadini/ai-powered-end-to-end-testing-a-new-paradigm-for-software-quality-assurance-1f5n) — retry logic, progressive context enrichment
-- [Playwright AI revolution (testomat.io)](https://testomat.io/blog/playwright-ai-revolution-in-test-automation/) — accessibility tree vs DOM selectors
-- [Best E2E Testing Tools 2026 (VirtuosoQA)](https://www.virtuosoqa.com/post/best-end-to-end-testing-tools) — market survey
+- [Jest CLI Options (official)](https://jestjs.io/docs/cli) — `--listTests`, `--verbose`, `--testNamePattern`, exit codes
+- [Playwright CLI reference (official)](https://playwright.dev/docs/test-cli) — `--list`, `--grep`, `--dry-run`, `--reporter`
+- [Vitest CLI reference (official)](https://vitest.dev/guide/cli) — `vitest list`, `--reporter=verbose`, `-t pattern`
+- [Cypress CLI reference (official)](https://docs.cypress.io/app/references/command-line) — `--spec`, exit codes (0, n failures, 1), `--posix-exit-codes`
+- [Evil Martians CLI UX best practices](https://evilmartians.com/chronicles/cli-ux-best-practices-3-patterns-for-improving-progress-displays) — spinner vs X-of-Y vs progress bar; TTY-compatible output
+- [POSIX exit code conventions](https://www.gnu.org/s/libc/manual/html_node/Exit-Status.html) — 0 = success, 1 = failure, 2 = usage error
+- [Playwright webServer preflight behavior](https://playwright.dev/docs/test-webserver) — ping-until-ready pattern before test start
+- [nanospinner (npm)](https://www.npmjs.com/package/nanospinner) — already in use; auto-disables in non-TTY
+- [picocolors (npm)](https://www.npmjs.com/package/picocolors) — already in use; auto-disables ANSI in non-TTY
+- Existing codebase: `src/cli.ts`, `src/output/reporter.ts`, `src/runner/test-runner.ts`, `src/cache/cache-manager.ts`, `src/runner/test-executor.ts`
 
 ---
 
-*Feature research for: AI-powered E2E browser + API testing CLI tool (SuperGhost)*
-*Researched: 2026-03-10*
+*Feature research for: SuperGhost v0.2 DX Polish + Reliability Hardening*
+*Researched: 2026-03-11*

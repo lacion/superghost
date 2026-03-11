@@ -1,196 +1,205 @@
 # Project Research Summary
 
-**Project:** SuperGhost — AI-powered E2E browser + API testing CLI tool
-**Domain:** AI-driven test automation CLI (Bun + Vercel AI SDK + Playwright MCP)
-**Researched:** 2026-03-10
+**Project:** SuperGhost v0.2 — DX Polish + Reliability Hardening
+**Domain:** AI-powered E2E browser testing CLI tool
+**Researched:** 2026-03-11
 **Confidence:** HIGH
 
 ## Executive Summary
 
-SuperGhost is a natural language E2E testing CLI built with Vercel AI SDK 6 and Bun that lets developers write test cases in plain English YAML and executes them via an LLM agent driving a real browser through the Playwright MCP protocol. The recommended approach is a layered CLI architecture with five clear modules — config, cache, agent, runner, output — where each layer has a single responsibility and depends only on layers below it. This structure makes the build-order deterministic and every component independently testable.
+SuperGhost v0.2 is a focused DX polish milestone layered on top of a fully working v1.0 CLI. The existing architecture is clean and well-factored — a thin `cli.ts` wiring layer, dependency-injected `TestRunner`/`TestExecutor`, a Vercel AI SDK `generateText` loop with MCP tool execution, and a `CacheManager` that hashes test cases against replay logs. All eight v0.2 features integrate into this existing skeleton without structural changes: they are additive wiring, not architectural redesigns. The one new file is `src/infra/preflight.ts`; every other change modifies an existing file. Only one new production dependency is required: `picomatch@^4.0.3` for `--only` glob pattern filtering.
 
-The defining technical moat is the step caching system: SHA-256-keyed JSON files that record every MCP tool call the AI agent makes, enabling ~50ms deterministic replay on subsequent runs instead of 10-60 second AI re-executions. Paired with self-healing behavior (cache miss triggers AI re-run, success overwrites stale cache, failure deletes it), this produces a system that is fast by default and maintenance-free as the UI evolves. This combination — local-first, YAML-only, cache-accelerated, self-healing — is not replicated by any of the cloud-hosted competitors (testRigor, Momentic, ZeroStep) who require accounts, constant AI calls per run, and often Playwright scaffolding.
+The recommended implementation approach is a strict build-order that frontloads foundational changes (exit code taxonomy, cache key normalization) before adding user-facing CLI flags (`--only`, `--no-cache`, `--dry-run`), then wires the most complex feature (real-time verbose step progress via Vercel AI SDK `onStepFinish`) last. This sequencing is dictated by concrete code-level dependencies identified through direct source inspection of the v1.0 codebase. The YAML config schema is untouched — all new flags are invocation-time CLI options only, preserving full backward compatibility for existing YAML config files.
 
-The primary risks are operational, not architectural. Orphaned MCP subprocess processes on unexpected exit, runaway AI token costs from uncapped agent loops, and non-deterministic behavior from ambiguous natural language test case descriptions are all well-documented failure modes with clear mitigations. These must be addressed in Phase 1 and Phase 2 — they cannot be deferred. The secondary risk is compiled binary distribution: `bun build --compile` has documented limitations with dynamic imports from MCP packages, meaning the binary artifact is a secondary distribution target and `bunx superghost` (npm) is the primary one.
+The primary risks are behavioral, not architectural. Three pitfalls in particular will produce silent, hard-to-diagnose production bugs if not addressed: (1) `--only` matching zero tests and exiting 0 instead of 2 in CI, (2) progress output written to stdout instead of stderr corrupting pipes and log files, and (3) Commander.js generating `options.cache` not `options.noCache` for the `--no-cache` flag — code checking `options.noCache` will always read `undefined`. Each is a one-to-three line mistake detectable only by targeted integration tests. Cache key normalization also requires Unicode NFC normalization in addition to whitespace trimming, or macOS-developed tests will miss the cache on Linux CI due to NFD vs NFC encoding differences.
+
+---
 
 ## Key Findings
 
 ### Recommended Stack
 
-SuperGhost is built entirely on the Vercel AI SDK ecosystem with Bun as the runtime. The stack is deliberately lean: no LangChain, no LangGraph, no separate transpile step. Bun executes TypeScript directly and compiles standalone binaries. Vercel AI SDK 6 provides the `generateText` agent loop with `maxSteps`/`stopWhen` control and the `@ai-sdk/mcp` client for connecting the agent to Playwright MCP over stdio. All four LLM providers are included at launch via provider packages that share the same unified API surface.
+The v0.2 stack adds exactly one new production dependency. The existing v1.0 stack (Bun, TypeScript, Commander.js 14, Vercel AI SDK 6, Zod 4, nanospinner, picocolors) handles every v0.2 feature directly. `picomatch@^4.0.3` is the sole addition, used for the `--only <pattern>` glob filter via `isMatch(testName, pattern)`. It was chosen over `minimatch` (active ReDoS CVEs in 2026: CVE-2026-26996, CVE-2026-27903, CVE-2026-27904) and `micromatch` (wraps picomatch but adds filesystem overhead not needed for string matching). All other v0.2 features use Bun built-ins, existing Commander.js `.option()` API, and `nanospinner`'s already-available `.update({ text })` method.
 
 **Core technologies:**
-- **Bun 1.3.9** — runtime, package manager, bundler, binary compiler. Native TypeScript execution, no transpile step; Anthropic ships Claude Code as a Bun binary, proving production readiness.
-- **Vercel AI SDK (`ai@6.0.116`)** — LLM orchestration, agent loop, multi-provider abstraction. `generateText` with `stopWhen: stepCountIs(N)` replaces LangGraph's `createReactAgent` in ~20 lines.
-- **`@ai-sdk/mcp@1.0.25`** — MCP client for connecting the AI agent to Playwright and curl MCP servers via stdio transport. Stable in SDK 6.
-- **`@playwright/mcp@0.0.68`** — Microsoft's official Playwright MCP server. Exposes accessibility-snapshot-based browser tools to the agent; no vision model required.
-- **TypeScript 5.x (via Bun)** — strict mode. Zod 4.3.6 for config validation (14x faster than v3). Commander.js 14.0.3 for CLI argument parsing.
-- **Providers:** `@ai-sdk/anthropic@3.0.58`, `@ai-sdk/openai@3.0.41`, `@ai-sdk/google@3.0.49`, `@openrouter/ai-sdk-provider@2.2.5` — all included at launch, selected at runtime by model name prefix.
-
-**What to avoid:** LangChain/LangGraph (removed by design), direct `playwright` API (bypasses MCP and breaks caching), Vercel AI SDK v4/v5 (experimental MCP APIs), Zod v3, `node:crypto` for hashing (use `Bun.CryptoHasher`), `fs`/`path` for file I/O (use `Bun.file()` / `Bun.write()`).
+- `picomatch@^4.0.3` — glob pattern matching for `--only` flag; zero deps, 4.4M ops/sec, used by Jest/Rollup/chokidar; `@types/picomatch@^4.0.2` for TypeScript types
+- `commander@14.0.3` (existing) — all four new flags use `.option()` API; `--no-cache` uses built-in `--no-` negatable prefix convention, generating `options.cache` (not `options.noCache`)
+- `nanospinner@1.2.2` (existing) — `.update({ text })` method supports real-time step text updates without restarting the spinner
+- Bun `fetch()` + `AbortSignal.timeout()` (built-in) — preflight reachability check with no additional HTTP library
+- `Bun.CryptoHasher` (built-in) — cache key normalization is a pure string transform applied before the existing hash call
 
 ### Expected Features
 
-The feature set is well-defined. The core value proposition is authoring + caching + self-healing without any SaaS dependency. Cloud-hosted competitors (testRigor, Momentic) require accounts and always burn AI tokens; ZeroStep requires existing Playwright code. SuperGhost requires only a YAML file and an API key.
+All eight features in scope are table stakes. The competitor analysis across Jest, Playwright, Vitest, and Cypress confirms these are universal CLI testing tool expectations. Absence makes SuperGhost feel like a prototype.
 
 **Must have (table stakes):**
-- Plain English test cases in YAML (`case: "check login is working"`) — the entire value prop
-- Zod-validated YAML config with sensible defaults (`baseUrl`, `browser`, `headless`, `timeout`, `maxAttempts`, `model`, `cacheDir`)
-- CLI entry point (`superghost --config tests.yaml`) with exit codes 0/1
-- AI agent executing tests via Playwright MCP (browser) and curl MCP (API), with auto-detection between the two
-- Sequential test execution with independent browser contexts per test
-- Configurable browser type, headless mode, timeout, max retries, multi-provider LLM support
-- Deterministic pass/fail/timing summary output with source attribution (`cache` vs `ai`)
+- `--dry-run` flag — lists tests without executing; every serious test CLI has this (Jest `--listTests`, Playwright `--list`, Vitest `vitest list`)
+- `--verbose` flag — per-step AI tool call output; debugging a 30s AI run with only a spinner is opaque
+- `--no-cache` flag — bypass cache reads; universal convention (Docker, npm, Turborepo); must still write cache after successful AI run
+- `--only <pattern>` filter — test subset selection; maps to Jest `-t`, Playwright `--grep`, Vitest `-t`
+- Preflight `baseUrl` reachability check — fail fast with a clear error before spending 30s on AI calls that will all fail against a downed server
+- Real-time step progress output — users feel anxious watching a static spinner for 30s; map tool names to human descriptions
+- Distinct exit codes 0/1/2 — without exit 2 for config errors, CI pipelines cannot distinguish "tests failed, retry" from "your pipeline is misconfigured"
+- Cache key normalization — whitespace-insensitive keys prevent trust-eroding cache misses from copy-paste formatting differences
 
-**Should have (competitive differentiators):**
-- Step caching at ~50ms replay via SHA-256-keyed JSON in `.superghost-cache/` — the performance moat
-- Self-healing cache: replay failure triggers AI re-run; success updates cache, failure deletes it
-- Cache invalidation on description change (hash includes the case string)
-- Human-readable cache JSON files (developers can inspect what the AI decided)
-- Bun-native compiled binary (`bun build --compile`) and `bunx superghost` npm distribution
-- Source attribution per test result: `[PASS] check login (cache, 45ms)` vs `[PASS] check login (ai, 8.2s)`
+**Competitive differentiators:**
+- Exit code 2 for zero-match `--only` filter — Jest and Playwright both exit 0 for empty filter results (silent CI footgun); SuperGhost takes the stricter, correct position
+- `--no-cache` still writes cache after a fresh AI run — most tools treat `--no-cache` as ephemeral; SuperGhost's cache is a long-term maintenance artifact that should be refreshed, not discarded
+- Verbose mode gracefully degrades in non-TTY — `picocolors` and `nanospinner` auto-disable; verbose output emits clean structured lines in CI pipes without any extra work
 
-**Defer (v2+):**
-- Parallel test execution — adds concurrency bugs, rate-limit risk, resource contention
-- Watch mode, test tagging/grouping, HTML report output
-- GUI/dashboard — anti-feature; changes the product category
-
-**Add after validation (v1.x):**
-- `--no-cache` / `--clear-cache` flags, `--only <pattern>` filtering, `--verbose` step-level output, JSON output mode, per-test `skip` flag in YAML
+**Defer to later milestones:**
+- `--watch` mode — comparable complexity to this entire milestone; `nodemon --exec "superghost --config tests.yaml"` is the interim workaround
+- `--bail` / fail-fast — cross-cuts runner and cache lifecycle; adds complex edge cases when a run is bailed with partially-populated cache
+- JSON/JUnit output (`--output json`) — full reporter refactor, not a DX flag; defer to a "reporting" milestone
+- Token/cost tracking — "observability" feature requiring per-provider cost tables that drift over time
 
 ### Architecture Approach
 
-The architecture follows a strict layered dependency direction: `config` → `cache` → `agent` → `runner` → `output` → `cli`. Each layer depends only on layers below it, enabling bottom-up development. Components communicate via injected function types and interfaces, not direct module imports across layers. This design means the AI SDK can be swapped without touching the runner, and the cache layer can be unit-tested without any LLM calls.
+All five v0.2 features thread through `cli.ts` as the aggregation point, with actual logic delegated to the module closest to the concern. The key insight is that `TestRunner` already accepts an injected `executeFn` — `--dry-run` is simply a different function passed at the same injection site, requiring no new abstraction. `--only` filtering is 3 lines in `cli.ts` (filter `config.tests` before constructing `TestRunner`; `TestRunner` never needs to know about patterns). Verbose step progress uses the Vercel AI SDK's existing `onStepFinish` callback in `generateText`, threaded from `cli.ts` through `TestExecutor` into `agent-runner.ts`. The YAML config schema is entirely unchanged — all new flags are invocation-time options, not project-level configuration.
 
-**Major components:**
-1. **Config Loader** — reads YAML, validates with Zod, throws typed `ConfigLoadError`. No business logic; consumed by `cli.ts` only.
-2. **CacheManager + StepRecorder + StepReplayer** — SHA-256 keyed JSON file store using Bun native file I/O. Recorder intercepts MCP tool calls during AI execution (records after success, not before). Replayer re-executes steps sequentially against a live browser. Symmetric design: recorder writes, replayer reads.
-3. **AgentRunner + ModelFactory + McpClientFactory** — `generateText` with wrapped MCP tools. ModelFactory selects provider by model name prefix. One MCP client (one `@playwright/mcp` subprocess) per test, closed in `finally`. Step recorder wraps tools before AI sees them.
-4. **TestRunner + TestExecutor** — sequential iteration over all tests. TestExecutor owns the cache-first decision tree and retry loop. TestRunner knows nothing about AI or caching.
-5. **Reporter** — event-driven console output, decoupled from execution state. Accepts `onTestStart`, `onTestComplete`, `onRunComplete` events.
+**Major components and their v0.2 changes:**
+1. `src/cli.ts` — primary wiring point; adds 4 Commander options, `--only` filter, preflight call, `--dry-run` branch, threads `verbose`/`noCache` flags to constructors, fixes exit code taxonomy in catch block
+2. `src/infra/preflight.ts` — **new file only**; `checkBaseUrl(url): Promise<void>` using `fetch()` + `AbortSignal.timeout(5000)`, throws `PreflightError`; placed in startup sequence before MCP initialization, after config load
+3. `src/cache/cache-manager.ts` — adds `normalizeKey()` static method: `s.normalize("NFC").trim().replace(/\s+/g, " ")`; applied to both `testCase` and `baseUrl` inputs before SHA-256 hashing
+4. `src/agent/agent-runner.ts` — accepts optional `onStepFinish?` callback in config; passes it to `generateText` for real-time tool call events
+5. `src/runner/test-executor.ts` — accepts `noCache?: boolean` and `onStepFinish?` as constructor options; guards `CacheManager.load()` with `noCache` check; threads callback to `executeAgentFn`
+6. `src/output/reporter.ts` — adds `verbose?: boolean` constructor option; adds `onStepProgress()` method; handles `"dry-run"` source in `onTestComplete`; suppresses spinner entirely in verbose mode
 
-**Key patterns to follow:**
-- Cache only `{ toolName, toolInput }` pairs — never cache tool results (they contain dynamic content)
-- Only inspect `generateText`'s `text` return value for `TEST_PASSED`/`TEST_FAILED` — not intermediate steps
-- Pass `Config` as constructor/function argument — never a global singleton
-- Temperature 0 for test execution — determinism over creativity
+**Unchanged files (confirmed):** `test-runner.ts`, `config/loader.ts`, `config/schema.ts`, `cache/step-recorder.ts`, `cache/step-replayer.ts`, `agent/mcp-manager.ts`, `agent/model-factory.ts`, `agent/prompt.ts`, `infra/process-manager.ts`, `infra/signals.ts`
 
 ### Critical Pitfalls
 
-1. **Orphaned MCP subprocesses on exit** — register synchronous `SIGINT`/`SIGTERM` handlers, track all MCP client refs in a global registry, always call `client.close()` in `finally`. Address in Phase 1 before any test execution logic is written.
-2. **Runaway AI token costs from uncapped agent loops** — set `maxSteps` default to 10 (not 20), implement per-test token budget via `prepareStep` callback, log token usage per test. Configure cost guardrails when wiring the agent loop in Phase 2.
-3. **Cache key collision from unnormalized strings** — normalize test case strings before hashing (trim, lowercase, collapse spaces); include a schema version in the key. A user editing YAML formatting should not bust the cache.
-4. **MCP connection context loss between tool calls** — one MCP client per test case, held open for the full test duration (AI run + replay), closed only in `finally`. Never share a client across tests or recreate per tool call.
-5. **Natural language ambiguity causing nondeterministic failures** — temperature 0, constrained system prompt specifying `TEST_PASSED`/`TEST_FAILED` terminal format, warn on test cases shorter than 5 words. Design the system prompt before wiring the cache.
-6. **`bun build --compile` failing with dynamic imports** — do not bundle MCP server packages into the binary; they run as separate stdio processes. Test compiled binary in a clean Docker container before releasing.
-7. **App under test not running at `baseUrl`** — preflight HTTP check before any test execution; abort with clear error and exit code 1 rather than burning AI tokens against an error page.
+1. **`--only` zero-match silently exits 0** — After filtering, explicitly check `if (testsToRun.length === 0)` and call `program.error(msg, { exitCode: 2 })`. Print available test names in the error. A CI pipeline reporting green with zero tests run is a latent disaster.
+
+2. **Progress output written to stdout corrupts pipes** — Route ALL progress lines through `process.stderr`, not `process.stdout`. Reserve stdout for parseable output. Before emitting ANSI or spinner output, check `process.stderr.isTTY`. Also gate on `process.env.CI`, `NO_COLOR`, and `TERM=dumb`. ANSI pollution in pipes (`\r`, `\x1b[2K`) produces silent interoperability failures that are difficult to diagnose after the fact.
+
+3. **Commander.js `--no-cache` property name trap** — Declaring `.option('--no-cache', ...)` generates `options.cache` (boolean), NOT `options.noCache`. Code checking `options.noCache` always reads `undefined`. Read `options.cache === false` to detect the flag. Write a unit test for both the flagged and unflagged invocations.
+
+4. **Cache normalization without Unicode NFC** — Whitespace trimming alone is insufficient. macOS file I/O uses NFD encoding; Linux uses NFC. The same test case description looks identical on screen but produces different SHA-256 hashes across platforms, causing every cache lookup to miss in CI. Apply `testCase.normalize("NFC")` before any other normalization. Include a version prefix in the hash input (`v2|${normalized}|${baseUrl}`) for a clean break with v1 keys.
+
+5. **Dry-run diverges from real execution** — Dry-run must still run `loadConfig()`, Zod schema validation, and API key presence check. It only skips `mcpManager.initialize()`, `executeAgent()`, and `cacheManager.save()`. A dry-run that does not catch config errors "lies" to the user and erodes trust. Document in CLI help text: "validates config and previews test plan without running AI or browser."
+
+---
 
 ## Implications for Roadmap
 
-Based on research, the build order is determined by strict component dependencies. The cache cannot exist without an AI agent to populate it. The runner cannot be tested without cache and agent. CLI wiring is last. This maps naturally to a 4-phase roadmap.
+Based on the build-order dependencies in ARCHITECTURE.md and the pitfall-to-phase mapping in PITFALLS.md, the recommended implementation sequence has 4 phases.
 
-### Phase 1: Foundation and CLI Infrastructure
+### Phase 1: Foundation (Exit Codes + Cache Normalization)
 
-**Rationale:** Config loading, CLI wiring, subprocess lifecycle management, and the reporter are zero-dependency components. They must exist before any test execution logic. Critically, the MCP subprocess lifecycle pattern (process signals, cleanup registry, `finally` blocks) must be established here — it is harder to retrofit than to build in from the start.
+**Rationale:** These two changes have zero feature dependencies. Exit code taxonomy must be locked before any subsequent feature can correctly emit exit 2 — implement it first so every subsequent error path uses the new taxonomy from the start. Cache normalization is a self-contained pure-function change that should land early and be documented as a breaking change in release notes.
 
-**Delivers:** A working CLI skeleton: `superghost --config tests.yaml` parses and validates config, wires dependencies, exits with code 0/1, and handles SIGINT/SIGTERM cleanly. No AI calls yet.
+**Delivers:** Correct POSIX exit code taxonomy (0/1/2); whitespace-insensitive and Unicode-insensitive cache keys; consistent cache hits between macOS developers and Linux CI
 
-**Addresses:** Plain English YAML config, CI/CD exit codes, deterministic summary output, configurable options.
+**Addresses:** Exit codes 0/1/2 feature; cache key normalization feature
 
-**Avoids:** Orphaned MCP subprocess pitfall (established here), global config singleton anti-pattern, exit code 2 vs 1 distinction (config error vs test failure).
+**Avoids:** Exit code 2 breaking existing CI scripts (lock taxonomy before any other feature introduces exit 2 paths); cache invalidation without version prefix; macOS/Linux NFD vs NFC hash mismatch
 
-**Research flag:** Standard patterns — no additional research needed. Config/CLI stack is fully documented.
+**Files changed:** `src/cli.ts` (catch block only), `src/cache/cache-manager.ts`
 
-### Phase 2: Agent Loop and Cache Layer
+### Phase 2: New Infrastructure + Flags (Preflight + --only + --no-cache)
 
-**Rationale:** This is the highest-complexity phase and the core of SuperGhost's value. The agent loop (AI SDK + MCP), step caching, self-healing, and the cache-first execution strategy are all implemented here as a unit. They are tightly coupled: the recorder wraps the agent's tools, the replayer uses the same MCP client type, and self-healing requires both to be present. Building these separately would require rebuilding integration surfaces.
+**Rationale:** These three features are independent of each other but all depend on Phase 1's exit code taxonomy. `preflight.ts` is a new module that can be developed and unit-tested in isolation. `--only` and `--no-cache` are thin wiring additions. No Reporter or Agent layer changes yet.
 
-**Delivers:** End-to-end test execution — first run uses AI and records steps, subsequent runs replay cache in ~50ms, self-healing triggers on cache staleness. All four LLM providers wired. Browser and API test auto-detection via Playwright and curl MCP.
+**Delivers:** Fail-fast baseUrl reachability check before any AI calls; test subset selection via glob pattern; cache bypass for forced fresh AI runs that still re-populate the cache on success
 
-**Uses:** Vercel AI SDK `generateText` + `@ai-sdk/mcp`, `@playwright/mcp`, `@mcp-get-community/server-curl`, all provider packages, `Bun.CryptoHasher`, `Bun.file`/`Bun.write`.
+**Addresses:** `--only <pattern>` feature; `--no-cache` feature; preflight `baseUrl` check feature
 
-**Implements:** AgentRunner, ModelFactory, McpClientFactory, CacheManager, StepRecorder, StepReplayer, TestExecutor.
+**Avoids:** `--only` zero-match silent exit 0 (check `testsToRun.length === 0` and exit 2 with list of available names); Commander.js `--no-cache` property name trap (read `options.cache`, not `options.noCache`); preflight hanging on slow servers (use `AbortSignal.timeout(5000)`, accept any HTTP response including 4xx as "reachable" — a 404 from a live server is still connectivity confirmed); per-test `baseUrl` check scope (only check global `config.baseUrl` at startup; per-test overrides surface as test failures)
 
-**Avoids:** Runaway token costs (maxSteps + cost cap), cache key normalization, MCP context loss (one client per test), nondeterministic behavior (temperature 0, constrained system prompt), caching failed results, app unreachable detection (preflight check).
+**Files changed:** `src/infra/preflight.ts` (new), `src/cli.ts` (preflight call + `--only` filter + `--no-cache` wiring), `src/runner/test-executor.ts` (`noCache` constructor option + cache-load guard)
 
-**Research flag:** This phase is the most likely candidate for `/gsd:research-phase` during planning. The AI SDK's `prepareStep` cost-tracking callback, OpenRouter model namespace handling, and Gemini tool call response shape differences all warrant deeper research before implementation.
+### Phase 3: Dry-Run Flag
 
-### Phase 3: Developer Experience and Output Polish
+**Rationale:** `--dry-run` is slightly more complex than the Phase 2 flags because it touches the Reporter (needs `"dry-run"` source label) and requires a type extension, but most importantly it must walk the same validation path as a real run — making its validation contract explicit requires focused attention. Isolating it here prevents the "dry-run lies about config errors" anti-pattern from being introduced alongside other Reporter changes.
 
-**Rationale:** Once the test execution loop is proven, DX features make the tool usable in CI and debuggable locally. These are low-complexity additions that significantly increase adoption but do not affect the core execution path.
+**Delivers:** Safe test plan preview without AI execution or browser launch; still validates config, Zod schema, and API key presence before listing what would run
 
-**Delivers:** Real-time step progress output during AI runs, source attribution (`cache` vs `ai`) in all result lines, verbose mode showing step-level actions, `--no-cache` / `--clear-cache` flags, `--only <pattern>` subset filtering, `--dry-run` config validation mode, per-test `skip` flag.
+**Addresses:** `--dry-run` feature
 
-**Addresses:** Silent cache usage UX pitfall, generic failure messages (require reason in `TEST_FAILED`), frozen CLI appearance during AI runs, ambiguous exit on config errors.
+**Avoids:** Dry-run diverging from real execution (must still call `loadConfig()` + Zod + API key presence check; only skips `mcpManager.initialize()` and `executeAgent()`); preflight check running in dry-run mode (preflight must be gated on actual execution mode); `[DRY RUN]` prefix on all output lines to clearly distinguish from real run output
 
-**Research flag:** Standard patterns — all DX features are well-documented. No research-phase needed.
+**Files changed:** `src/runner/types.ts` (add `"dry-run"` to `TestSource` union), `src/output/reporter.ts` (handle dry-run source label), `src/cli.ts` (dry-run branch before MCP init)
 
-### Phase 4: Distribution and Packaging
+### Phase 4: Verbose Mode + Real-Time Step Progress
 
-**Rationale:** Binary compilation and npm publishing require a fully working tool to package. This phase also includes the security and correctness checklist items that are hard to verify during development: compiled binary in a clean environment, multi-provider wiring verification, self-healing delete-on-failure verification, exit code propagation.
+**Rationale:** This is the most complex feature because it spans four files and threads a callback from `cli.ts` through `TestExecutor` into `generateText` in `agent-runner.ts`. It is the last phase because it depends on the Reporter changes from Phase 3 and because the verbose/spinner conflict requires careful handling: when `--verbose` is active, the nanospinner must be suppressed entirely — spinners overwrite lines via `\r` and will corrupt sequential verbose output.
 
-**Delivers:** `bunx superghost` npm package, `bun build --compile` standalone binary artifact, CI release workflow, README with install and usage documentation, `.gitignore` recommendations for cache directory.
+**Delivers:** Per-step AI tool call output during execution with step numbers; real-time feedback for long-running tests; clean non-TTY behavior in CI via auto-detected output routing
 
-**Avoids:** `bun build --compile` dynamic import failures (MCP servers run as external processes, not bundled), credential exposure in cache files (documented `.gitignore` guidance), prompt injection via page content (strict system prompt and `TEST_PASSED`/`TEST_FAILED` exact-match detection).
+**Addresses:** `--verbose` flag feature; real-time step progress feature
 
-**Research flag:** Binary packaging in a clean Docker environment should be verified before release. The Bun compile limitation with dynamic imports is a confirmed issue — validate early that `@playwright/mcp` is fully excluded from the binary bundle.
+**Avoids:** Progress output corrupting pipes (all progress to stderr, gate on `isTTY`, check `CI`/`NO_COLOR` env vars); verbose mode and nanospinner conflicting (suppress spinner entirely in verbose mode; use sequential `console.error` lines instead); agent internals bypassing Reporter abstraction (route all step events through `Reporter.onStepProgress()` — the reporter already owns TTY detection)
+
+**Files changed:** `src/output/types.ts` (add `onStepProgress?` to Reporter interface), `src/output/reporter.ts` (implement verbose mode and step progress), `src/agent/agent-runner.ts` (add `onStepFinish?` callback to config, pass to `generateText`), `src/runner/test-executor.ts` (thread `onStepFinish` through to `executeAgentFn`), `src/cli.ts` (verbose flag wiring)
 
 ### Phase Ordering Rationale
 
-- **Config before everything:** No other component can be built without knowing the Config type. Zero-dependency phase, testable immediately.
-- **Cache before runner:** TestExecutor owns the cache-or-AI decision; it cannot be written until CacheManager, StepRecorder, and StepReplayer exist.
-- **Agent with cache (not before):** StepRecorder wraps agent tools; AgentRunner returns to TestExecutor. Building them in the same phase avoids designing temporary interfaces.
-- **Preflight check in Phase 2 (not 3):** The app-unreachable pitfall burns real money. It must be in the same phase as the agent loop, not deferred as a DX polish item.
-- **Distribution last:** Binary artifacts and npm publishing require a stable, tested tool. Premature packaging adds release infrastructure before the core is validated.
+- **Phase 1 before everything:** Exit code taxonomy must be locked so every subsequent `program.error(..., { exitCode: 2 })` call uses the correct taxonomy from the first commit. Cache normalization is a breaking change that should be isolated and documented before user-facing flags build on top of it.
+- **Phase 2 before Phase 3:** `--only` and `--no-cache` have no Reporter dependencies; establishing them early means Phase 3 can focus entirely on the dry-run validation contract without also juggling flag wiring.
+- **Phase 3 before Phase 4:** Phase 4 modifies `reporter.ts`; having the dry-run source label already in place means the verbose reporter changes are additive and non-conflicting.
+- **Phase 4 last:** The `onStepFinish` callback chain is the only multi-file threading operation in the milestone. Isolating it to the final phase means every other feature is stable and testable before the most complex integration begins.
 
 ### Research Flags
 
-Phases likely needing deeper research during planning:
-- **Phase 2:** `prepareStep` token-budget callback in Vercel AI SDK 6 (verify API shape), OpenRouter model namespace format (non-standard `anthropic/claude-3-5-sonnet` IDs), Gemini tool call response shape differences vs Anthropic, `@mcp-get-community/server-curl` API test auto-detection heuristics.
+Phases with well-documented patterns (skip deep research-phase during planning):
+- **Phase 1:** Pure function changes to existing code — no external API dependencies; all patterns are fully known from v1.0
+- **Phase 2:** `infra/preflight.ts` uses Bun `fetch()` + `AbortSignal.timeout()` which is verified in official Bun docs; `picomatch.isMatch()` is a single well-documented function call
+- **Phase 3:** `TestRunner` dependency injection pattern already works in v1.0; dry-run is wiring, not new design
 
-Phases with standard patterns (skip research-phase):
-- **Phase 1:** Config/CLI/reporter stack is fully documented and validated by reference implementation.
-- **Phase 3:** All DX features are additive CLI flags and output formatting — well-established patterns.
-- **Phase 4:** Bun compile and npm packaging documentation is complete; the one risk (dynamic imports) is already documented and the mitigation is clear.
+Phases that may benefit from a targeted spike before detailed planning:
+- **Phase 4:** The Vercel AI SDK `onStepFinish` callback field names for individual tool calls (`toolCalls[n].toolName`, `toolCalls[n].input`) should be verified against the exact installed SDK version (`ai@6.0.116`) before implementation. SDK 6 changed several callback signatures relative to SDK 3. This is a low-risk gap — if the field names differ, the fix is a 2-line change.
+
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All versions verified against npm and official docs on 2026-03-10. SuperGhost validates the Vercel AI SDK + Playwright MCP combination in production. |
-| Features | HIGH | Reference implementation inspected directly. Competitor feature sets verified against official sites. Feature dependency graph validated against architecture. |
-| Architecture | HIGH | Based on natural language E2E testing patterns plus Vercel AI SDK official documentation. Component boundaries and data flows are proven patterns, not speculation. |
-| Pitfalls | HIGH | All critical pitfalls are documented with GitHub issue references, forum posts, and official documentation. The MCP process leak and Bun compile limitation are confirmed bugs with public trackers. |
+| Stack | HIGH | All versions verified against npm registry as of 2026-03-11; picomatch CVE comparison verified against GitHub Advisory database; Bun `AbortSignal.timeout()` confirmed in official Bun docs |
+| Features | HIGH | Verified against official CLI documentation for Jest, Playwright, Vitest, and Cypress; POSIX exit code conventions confirmed; all competitor CLI behavior claims are from official reference docs |
+| Architecture | HIGH | Based on direct source inspection of the shipped v1.0 codebase; Vercel AI SDK `onStepFinish` callback confirmed in official SDK docs; component change summary validated against actual file structure |
+| Pitfalls | HIGH | Commander.js `--no-` property name behavior confirmed in issue tracker (#979); Unicode NFD/NFC cross-platform issue is documented OS behavior; all other pitfalls are direct architectural consequences of identified implementation choices |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **`prepareStep` cost-tracking API:** The token-budget mechanism in Vercel AI SDK 6 is documented but not yet validated in SuperGhost's implementation. Validate the exact API shape before implementing Phase 2's cost guardrails.
-- **OpenRouter model namespace:** OpenRouter uses `anthropic/claude-3-5-sonnet` format, not `claude-3-5-sonnet`. The ModelFactory prefix-detection logic must handle this; the exact mapping needs a quick implementation test.
-- **Gemini tool calling behavior:** The PITFALLS research flags that Gemini has different tool call response shapes. This needs a dedicated integration test in Phase 2 before claiming multi-provider support is complete.
-- **curl MCP auto-detection heuristics:** The research confirms that the AI agent auto-detects API vs browser tests based on the test description, but the exact heuristics (HTTP verbs, URL patterns) are not fully specified. The system prompt design in Phase 2 must address this concretely.
-- **Cache atomicity:** PITFALLS research flags atomic cache writes (write to temp file, rename). Bun's `Bun.write()` behavior for atomic file replacement should be validated — it may require a temp-file-then-rename pattern explicitly.
+- **Vercel AI SDK `onStepFinish` exact field names:** Research confirms the callback exists and its general shape, but the exact field names on individual tool call objects within `step.toolCalls[n]` should be verified against `ai@6.0.116` source before Phase 4 begins. Low risk — a 2-line fix if wrong.
+- **Per-test `baseUrl` override preflight scope:** PITFALLS.md recommends checking all unique per-test `baseUrl` overrides at startup; the recommended resolution is to check only the global `config.baseUrl` at startup and let per-test URL failures surface as test failures. This design decision should be made explicit in Phase 2 planning and documented in CLI help text.
+- **`--no-cache` write semantics:** The research is consistent that `--no-cache` should skip reads but still write on success ("refresh the cache"). This is intentionally different from Docker's read-only semantics. The help text must say "Skips reading cache; still writes on success" to prevent user confusion.
+
+---
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [Vercel AI SDK MCP docs](https://ai-sdk.dev/docs/ai-sdk-core/mcp-tools) — `createMCPClient`, transport APIs, tool conversion
-- [Vercel AI SDK Tool Calling docs](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling) — `generateText`, `stopWhen`, `stepCountIs`, `prepareStep`
-- [AI SDK 6 release blog](https://vercel.com/blog/ai-sdk-6) — SDK 6 feature set and breaking changes
-- [Bun standalone executables](https://bun.com/docs/bundler/executables) — `bun build --compile` documentation
-- npm package pages for: `ai@6.0.116`, `@ai-sdk/mcp@1.0.25`, `@playwright/mcp@0.0.68`, `zod@4.3.6`, `commander@14.0.3`
+
+- Commander.js GitHub — `program.error()` with `exitCode` option, `--no-` prefix property name convention, Commander v14 `.option()` patterns; issue #979 for historical `--no-` default behavior
+- Vercel AI SDK official docs (`ai-sdk.dev`) — `generateText` `onStepFinish` callback signature and behavior; confirmed parameter is `onStepFinish: (step: StepResult) => void`
+- Bun official docs — `fetch()` + `AbortSignal.timeout()` support, `CryptoHasher`, native `.env` loading, `Bun.file`/`Bun.write`
+- picomatch npm registry + GitHub README — `isMatch()` API, performance benchmarks (4.4M ops/sec), zero-dependency confirmation, last updated July 2025
+- @types/picomatch npm — version 4.0.2, updated July 2025 for picomatch 4.x API
+- Jest CLI reference (official) — `--listTests`, `--verbose`, `--testNamePattern`, exit code behavior
+- Playwright CLI reference (official) — `--list`, `--grep`, `--dry-run`, `--reporter`, `webServer` preflight ping behavior
+- Vitest CLI reference (official) — `vitest list`, `--reporter=verbose`, `-t pattern`
+- Cypress CLI reference (official) — exit codes, `--posix-exit-codes`, `--spec`
+- POSIX exit code conventions — 0 = success, 1 = failure, 2 = usage/configuration error
+- Unicode Consortium UAX #15 — NFC as recommended normalization form for storage and comparison
+- SuperGhost v1.0 source (direct inspection) — `src/cli.ts`, `src/runner/test-runner.ts`, `src/cache/cache-manager.ts`, `src/runner/test-executor.ts`, `src/agent/agent-runner.ts`, `src/output/reporter.ts`
 
 ### Secondary (MEDIUM confidence)
-- [MCP Server Process Leak — Cursor Forum](https://forum.cursor.com/t/mcp-server-process-leak/151615) — confirms orphaned subprocess pattern
-- [Claude Code GitHub Issue #1935](https://github.com/anthropics/claude-code/issues/1935) — MCP server not terminated on exit
-- [Bun Issue #24470](https://github.com/oven-sh/bun/issues/24470) — `bun build --compile` binary fails with dynamic imports
-- [Self-Healing Test Automation Guide (Momentic)](https://momentic.ai/blog/self-healing-test-automation-guide) — self-healing patterns
+
+- minimatch CVE-2026-26996 (GitHub Advisory) — ReDoS via repeated wildcards; active in minimatch 10.x; also CVE-2026-27903, CVE-2026-27904 per npm issue #9037
+- Bun fetch timeout GitHub issue #13392 — documents changed default timeout behavior across Bun versions; basis for recommending explicit `AbortSignal.timeout()` rather than relying on Bun defaults
+- nanospinner npm — TTY auto-disable behavior; partially documented; auto-disable in non-TTY confirmed by analogy with picocolors which documents this explicitly
 
 ### Tertiary (LOW confidence)
-- [Rethinking Testing for LLM Applications (arXiv 2025)](https://arxiv.org/html/2508.20737v1) — natural language ambiguity impairs validation; needs project-specific validation
-- [Best E2E Testing Tools 2026 (VirtuosoQA)](https://www.virtuosoqa.com/post/best-end-to-end-testing-tools) — market survey used for competitor feature comparison
+
+- Evil Martians CLI UX best practices — spinner vs. progress display patterns; TTY-compatible output recommendations; used for verbose output format guidance
+- TTY detection CLI issue tracker (forcedotcom/cli #327) — production example of ANSI pollution in CI logs; confirms routing progress to stderr as correct mitigation
 
 ---
-*Research completed: 2026-03-10*
+
+*Research completed: 2026-03-11*
 *Ready for roadmap: yes*
