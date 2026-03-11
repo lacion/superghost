@@ -35,11 +35,11 @@
   1. CLI exits 0 when all tests pass, 1 when any test fails, and 2 when config is invalid or a runtime error occurs before test execution
   2. Two test cases differing only in whitespace or Unicode normalization form (NFD vs NFC) produce the same cache key and share cached results
   3. Existing v1 cache entries are cleanly bypassed (not erroneously matched) due to the v2 version prefix in new cache keys
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
+- [ ] 04-01-PLAN.md — POSIX exit code taxonomy (0/1/2) in cli.ts
+- [ ] 04-02-PLAN.md — Cache key normalization + v2 prefix + v1 migration
 
 ### Phase 5: Infrastructure + Flags
 **Goal**: Users can filter tests, bypass cache, and get fast failure on unreachable servers before wasting time on AI execution
@@ -91,7 +91,7 @@ Plans:
 | 1. Foundation | v1.0 | 3/3 | Complete | 2026-03-11 |
 | 2. Core Engine | v1.0 | 4/4 | Complete | 2026-03-11 |
 | 3. Distribution | v1.0 | 2/2 | Complete | 2026-03-11 |
-| 4. Foundation | v0.2 | 0/? | Not started | - |
+| 4. Foundation | v0.2 | 0/2 | Not started | - |
 | 5. Infrastructure + Flags | v0.2 | 0/? | Not started | - |
 | 6. Dry-Run | v0.2 | 0/? | Not started | - |
 | 7. Observability | v0.2 | 0/? | Not started | - |
