@@ -346,4 +346,71 @@ describe("TestExecutor", () => {
       expect(result.durationMs).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe("noCache option", () => {
+    it("noCache skips cache load and calls agent directly", async () => {
+      cacheManager.load.mockResolvedValue(FAKE_CACHE_ENTRY);
+      executeAgentFn.mockResolvedValue({
+        passed: true,
+        message: "Passed via AI",
+        steps: [{ toolName: "click", toolInput: { selector: "#btn" } }],
+      });
+
+      const noCacheExecutor = new TestExecutor({
+        cacheManager: cacheManager as unknown as CacheManager,
+        replayer: replayer as unknown as StepReplayer,
+        executeAgentFn,
+        config: DEFAULT_CONFIG,
+        noCache: true,
+      });
+
+      const result = await noCacheExecutor.execute(
+        "check login works",
+        "https://example.com",
+      );
+
+      expect(result.status).toBe("passed");
+      expect(result.source).toBe("ai");
+      expect(cacheManager.load).not.toHaveBeenCalled();
+      expect(replayer.replay).not.toHaveBeenCalled();
+      expect(executeAgentFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("noCache still writes cache on successful AI run", async () => {
+      executeAgentFn.mockResolvedValue({
+        passed: true,
+        message: "Passed via AI",
+        steps: [{ toolName: "click", toolInput: { selector: "#btn" } }],
+      });
+
+      const noCacheExecutor = new TestExecutor({
+        cacheManager: cacheManager as unknown as CacheManager,
+        replayer: replayer as unknown as StepReplayer,
+        executeAgentFn,
+        config: DEFAULT_CONFIG,
+        noCache: true,
+      });
+
+      await noCacheExecutor.execute(
+        "check login works",
+        "https://example.com",
+      );
+
+      expect(cacheManager.save).toHaveBeenCalledTimes(1);
+    });
+
+    it("default behavior (noCache=false) loads cache first", async () => {
+      cacheManager.load.mockResolvedValue(FAKE_CACHE_ENTRY);
+      replayer.replay.mockResolvedValue({ success: true });
+
+      const result = await executor.execute(
+        "check login works",
+        "https://example.com",
+      );
+
+      expect(result.status).toBe("passed");
+      expect(result.source).toBe("cache");
+      expect(cacheManager.load).toHaveBeenCalledTimes(1);
+    });
+  });
 });

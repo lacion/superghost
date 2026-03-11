@@ -32,6 +32,7 @@ export class TestExecutor {
     "maxAttempts" | "recursionLimit" | "model" | "modelProvider"
   > & { context?: string };
   private readonly globalContext?: string;
+  private readonly noCache: boolean;
 
   constructor(opts: {
     cacheManager: CacheManager;
@@ -44,6 +45,7 @@ export class TestExecutor {
       "maxAttempts" | "recursionLimit" | "model" | "modelProvider"
     > & { context?: string };
     globalContext?: string;
+    noCache?: boolean;
   }) {
     this.cacheManager = opts.cacheManager;
     this.replayer = opts.replayer;
@@ -52,6 +54,7 @@ export class TestExecutor {
     this.tools = opts.tools ?? {};
     this.config = opts.config;
     this.globalContext = opts.globalContext;
+    this.noCache = opts.noCache ?? false;
   }
 
   /** Execute a single test case with cache-first strategy */
@@ -62,24 +65,26 @@ export class TestExecutor {
   ): Promise<TestResult> {
     const start = Date.now();
 
-    // Phase 1: Try cache replay
-    const cached = await this.cacheManager.load(testCase, baseUrl);
-    if (cached) {
-      const replay = await this.replayer.replay(cached.steps);
-      if (replay.success) {
-        return {
-          testName: testCase,
-          testCase,
-          status: "passed",
-          source: "cache",
-          durationMs: Date.now() - start,
-        };
+    // Phase 1: Try cache replay (unless noCache)
+    if (!this.noCache) {
+      const cached = await this.cacheManager.load(testCase, baseUrl);
+      if (cached) {
+        const replay = await this.replayer.replay(cached.steps);
+        if (replay.success) {
+          return {
+            testName: testCase,
+            testCase,
+            status: "passed",
+            source: "cache",
+            durationMs: Date.now() - start,
+          };
+        }
+        // Cache stale — fall through to AI with self-heal flag
+        return this.executeWithAgent(testCase, baseUrl, start, true, testContext);
       }
-      // Cache stale — fall through to AI with self-heal flag
-      return this.executeWithAgent(testCase, baseUrl, start, true, testContext);
     }
 
-    // Phase 2: No cache — go directly to AI
+    // Phase 2: No cache or noCache — go directly to AI
     return this.executeWithAgent(testCase, baseUrl, start, false, testContext);
   }
 

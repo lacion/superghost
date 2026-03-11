@@ -34,6 +34,7 @@ program
   .requiredOption("-c, --config <path>", "Path to YAML config file")
   .option("--headed", "Run browser in headed mode (visible browser window)")
   .option("--only <pattern>", "Run only tests matching glob pattern")
+  .option("--no-cache", "Bypass cache reads (still writes on success)")
   .exitOverride((err) => {
     // Commander writes its own error message to stderr.
     // Re-exit with code 2 for config-class errors (missing required option, unknown option).
@@ -116,6 +117,7 @@ program
         tools,
         config,
         globalContext: config.context,
+        noCache: !options.cache,
       });
 
       // Wire execute function for TestRunner
@@ -132,7 +134,10 @@ program
       if (options.only) {
         console.log(pc.dim(`  (filtered by --only "${options.only}")`));
       }
-      if (options.only) {
+      if (!options.cache) {
+        console.log(pc.dim("  (cache disabled)"));
+      }
+      if (options.only || !options.cache) {
         console.log("");
       }
 

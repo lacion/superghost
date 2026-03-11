@@ -83,6 +83,40 @@ describe("CLI Pipeline Integration", () => {
     expect(stdout).toContain("0.1.1");
   });
 
+  test("--no-cache flag is accepted (exits 2 for missing API key, not unknown option)", async () => {
+    const { exitCode, stderr } = await runCli(
+      ["--config", "tests/fixtures/valid-config.yaml", "--no-cache"],
+      { OPENAI_API_KEY: "" },
+    );
+    expect(exitCode).toBe(2);
+    // Should fail for missing API key, NOT for unknown option
+    expect(stderr).toContain("Missing API key");
+    expect(stderr).not.toContain("unknown option");
+  });
+
+  test("--only with zero matches exits 2 with available test names", async () => {
+    const { exitCode, stderr } = await runCli(
+      [
+        "--config",
+        "tests/fixtures/multi-test-config.yaml",
+        "--only",
+        "nonexistent*",
+      ],
+      { OPENAI_API_KEY: "fake-key-for-filter-test" },
+    );
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("No tests match pattern");
+    expect(stderr).toContain("Login Flow");
+    expect(stderr).toContain("Dashboard Load");
+  });
+
+  test("--help shows --only and --no-cache options", async () => {
+    const { exitCode, stdout } = await runCli(["--help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("--only");
+    expect(stdout).toContain("--no-cache");
+  });
+
   // Note: "unhandled exception in action exits 2" is hard to trigger in
   // integration tests since it requires an exception that doesn't match
   // ConfigLoadError or "Missing API key". The catch-all is verified by
