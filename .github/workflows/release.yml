@@ -97,4 +97,12 @@ jobs:
           npm pkg set version="$VERSION"
 
       - name: Publish to npm (OIDC trusted publishing)
-        run: npm publish --access public
+        run: |
+          VERSION=$(node -p 'require("./package.json").version')
+          npm publish --access public || {
+            if npm view "superghost@$VERSION" version >/dev/null 2>&1; then
+              echo "v$VERSION already published to npm — skipping"
+            else
+              exit 1
+            fi
+          }
