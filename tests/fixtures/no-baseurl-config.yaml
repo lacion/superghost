@@ -1,0 +1,5 @@
+model: gpt-4o
+modelProvider: openai
+tests:
+  - name: API Health Check
+    case: verify the API returns a valid response

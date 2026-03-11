@@ -117,6 +117,61 @@ describe("CLI Pipeline Integration", () => {
     expect(stdout).toContain("--no-cache");
   });
 
+  test("unreachable baseUrl exits 2 with error message", async () => {
+    // Write a temp config with an unreachable baseUrl
+    const tmpConfig = "/tmp/superghost-unreachable-test.yaml";
+    await Bun.write(
+      tmpConfig,
+      [
+        "baseUrl: http://127.0.0.1:19999",
+        "model: gpt-4o",
+        "modelProvider: openai",
+        "tests:",
+        "  - name: Test One",
+        '    case: check something',
+      ].join("\n"),
+    );
+
+    const { exitCode, stderr } = await runCli(
+      ["--config", tmpConfig],
+      { OPENAI_API_KEY: "fake-key-for-preflight-test" },
+    );
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("baseUrl unreachable");
+    expect(stderr).toContain("127.0.0.1:19999");
+  });
+
+  test("config without baseUrl skips preflight (fails on API key instead)", async () => {
+    const { exitCode, stderr } = await runCli(
+      ["--config", "tests/fixtures/no-baseurl-config.yaml"],
+      { OPENAI_API_KEY: "" },
+    );
+    expect(exitCode).toBe(2);
+    // Should fail for missing API key, NOT for baseUrl unreachable
+    // This proves preflight was skipped when no baseUrl is configured
+    expect(stderr).toContain("Missing API key");
+    expect(stderr).not.toContain("baseUrl unreachable");
+  });
+
+  test("--only zero-match exits before preflight check", async () => {
+    // multi-test-config.yaml has baseUrl: https://example.com
+    // Even if baseUrl were unreachable, --only zero-match should exit first
+    const { exitCode, stderr } = await runCli(
+      [
+        "--config",
+        "tests/fixtures/multi-test-config.yaml",
+        "--only",
+        "nonexistent*",
+      ],
+      { OPENAI_API_KEY: "fake-key-for-order-test" },
+    );
+    expect(exitCode).toBe(2);
+    // Should show "No tests match", NOT "baseUrl unreachable"
+    // This proves startup order: --only filter runs before preflight
+    expect(stderr).toContain("No tests match");
+    expect(stderr).not.toContain("baseUrl unreachable");
+  });
+
   // Note: "unhandled exception in action exits 2" is hard to trigger in
   // integration tests since it requires an exception that doesn't match
   // ConfigLoadError or "Missing API key". The catch-all is verified by
