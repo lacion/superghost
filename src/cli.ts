@@ -125,4 +125,6 @@ program
     }
   });
 
-await program.parseAsync();
+(async () => {
+  await program.parseAsync();
+})();

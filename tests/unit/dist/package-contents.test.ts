@@ -14,8 +14,8 @@ describe("package contents", () => {
       expect(pkg.name).toBe("superghost");
     });
 
-    test("version is '0.1.0'", () => {
-      expect(pkg.version).toBe("0.1.0");
+    test("version is '0.1.1'", () => {
+      expect(pkg.version).toBe("0.1.1");
     });
 
     test("has description", () => {

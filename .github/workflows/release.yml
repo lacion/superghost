@@ -88,5 +88,10 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Set version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm pkg set version="$VERSION"
+
       - name: Publish to npm (OIDC trusted publishing)
         run: npm publish --access public
