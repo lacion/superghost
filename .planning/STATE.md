@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: DX Polish + Reliability Hardening
-status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-03-11T22:53:48.298Z"
-last_activity: 2026-03-11 — Completed plan 04-01 (POSIX exit codes)
+status: phase-complete
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-03-11T22:55:14Z"
+last_activity: 2026-03-11 — Completed plan 04-02 (cache normalization + v2 migration)
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 50
+  completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -26,24 +26,24 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 ## Current Position
 
 Phase: 4 of 7 (Foundation)
-Plan: 1 of 2 complete
-Status: Executing
-Last activity: 2026-03-11 — Completed plan 04-01 (POSIX exit codes)
+Plan: 2 of 2 complete
+Status: Phase complete
+Last activity: 2026-03-11 — Completed plan 04-02 (cache normalization + v2 migration)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1 (v0.2)
-- Average duration: 2min
-- Total execution time: 2min
+- Total plans completed: 2 (v0.2)
+- Average duration: 3min
+- Total execution time: 6min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 04-foundation | 1/2 | 2min | 2min |
+| 04-foundation | 2/2 | 6min | 3min |
 
 *Updated after each plan completion*
 
@@ -55,6 +55,9 @@ Full decision log in PROJECT.md Key Decisions table.
 
 - (04-01) Used Commander exitOverride to intercept parse errors and re-exit with code 2
 - (04-01) Replaced throw error catch-all with explicit exit(2) and Unexpected error message
+- (04-02) Case-preserving normalization: different letter casing produces different cache keys
+- (04-02) v2 prefix in hash input string for clean break from v1 cache entries
+- (04-02) URL normalization via new URL() constructor for hostname lowercasing
 
 ### Pending Todos
 
@@ -72,6 +75,6 @@ From research:
 
 ## Session Continuity
 
-Last session: 2026-03-11T22:53:02Z
-Stopped at: Completed 04-01-PLAN.md
-Resume file: .planning/phases/04-foundation/04-01-SUMMARY.md
+Last session: 2026-03-11T22:55:14Z
+Stopped at: Completed 04-02-PLAN.md (Phase 4 complete)
+Resume file: .planning/phases/04-foundation/04-02-SUMMARY.md

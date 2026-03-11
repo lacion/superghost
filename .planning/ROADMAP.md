@@ -20,7 +20,7 @@
 
 **Milestone Goal:** Make SuperGhost debuggable, observable, and resilient so users can iterate efficiently and CI pipelines get actionable signals.
 
-- [ ] **Phase 4: Foundation** — Distinct exit codes and cache key normalization
+- [x] **Phase 4: Foundation** — Distinct exit codes and cache key normalization
 - [ ] **Phase 5: Infrastructure + Flags** — Preflight reachability, --only filter, --no-cache bypass
 - [ ] **Phase 6: Dry-Run** — Config-validating test preview without AI execution
 - [ ] **Phase 7: Observability** — Verbose mode and real-time step progress
@@ -38,8 +38,8 @@
 **Plans:** 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — POSIX exit code taxonomy (0/1/2) in cli.ts
-- [ ] 04-02-PLAN.md — Cache key normalization + v2 prefix + v1 migration
+- [x] 04-01-PLAN.md — POSIX exit code taxonomy (0/1/2) in cli.ts
+- [x] 04-02-PLAN.md — Cache key normalization + v2 prefix + v1 migration
 
 ### Phase 5: Infrastructure + Flags
 **Goal**: Users can filter tests, bypass cache, and get fast failure on unreachable servers before wasting time on AI execution

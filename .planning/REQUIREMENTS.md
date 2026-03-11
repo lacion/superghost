@@ -21,8 +21,8 @@ Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap ph
 
 ### Cache
 
-- [ ] **CACHE-01**: Cache keys are normalized (whitespace collapse, Unicode NFC, case-preserved) so formatting differences don't bust cache
-- [ ] **CACHE-02**: Cache keys include version prefix (`v2|...`) for clean break from v1 keys
+- [x] **CACHE-01**: Cache keys are normalized (whitespace collapse, Unicode NFC, case-preserved) so formatting differences don't bust cache
+- [x] **CACHE-02**: Cache keys include version prefix (`v2|...`) for clean break from v1 keys
 
 ### Observability
 
@@ -74,8 +74,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | ERR-01 | Phase 4 | Complete |
-| CACHE-01 | Phase 4 | Pending |
-| CACHE-02 | Phase 4 | Pending |
+| CACHE-01 | Phase 4 | Complete |
+| CACHE-02 | Phase 4 | Complete |
 | ERR-02 | Phase 5 | Pending |
 | FLAG-04 | Phase 5 | Pending |
 | FLAG-03 | Phase 5 | Pending |
