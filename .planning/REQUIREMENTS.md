@@ -11,8 +11,8 @@ Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap ph
 
 - [ ] **FLAG-01**: User can run `--dry-run` to list test names and validate config without executing AI or launching browser
 - [ ] **FLAG-02**: User can run `--verbose` to see per-step AI tool call output during test execution
-- [ ] **FLAG-03**: User can run `--no-cache` to bypass cache reads while still writing cache on successful AI runs
-- [ ] **FLAG-04**: User can run `--only <pattern>` to filter tests by glob pattern, with exit 2 if zero tests match
+- [x] **FLAG-03**: User can run `--no-cache` to bypass cache reads while still writing cache on successful AI runs
+- [x] **FLAG-04**: User can run `--only <pattern>` to filter tests by glob pattern, with exit 2 if zero tests match
 
 ### Error Handling
 
@@ -77,8 +77,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CACHE-01 | Phase 4 | Complete |
 | CACHE-02 | Phase 4 | Complete |
 | ERR-02 | Phase 5 | Pending |
-| FLAG-04 | Phase 5 | Pending |
-| FLAG-03 | Phase 5 | Pending |
+| FLAG-04 | Phase 5 | Complete |
+| FLAG-03 | Phase 5 | Complete |
 | FLAG-01 | Phase 6 | Pending |
 | FLAG-02 | Phase 7 | Pending |
 | OBS-01 | Phase 7 | Pending |
