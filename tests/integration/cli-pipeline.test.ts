@@ -70,9 +70,9 @@ describe("CLI Pipeline Integration", () => {
     expect(stdout).toContain("superghost");
   });
 
-  test("--version shows 0.1.0", async () => {
+  test("--version shows 0.1.1", async () => {
     const { exitCode, stdout } = await runCli(["--version"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("0.1.0");
+    expect(stdout).toContain("0.1.1");
   });
 });

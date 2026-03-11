@@ -64,7 +64,7 @@ describe("Binary Build Integration", () => {
       await new Response(proc.stderr).text();
       const exitCode = await proc.exited;
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("0.1.0");
+      expect(stdout).toContain("0.1.1");
     },
     30_000,
   );
