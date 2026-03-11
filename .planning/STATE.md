@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: DX Polish + Reliability Hardening
-status: defining_requirements
+status: ready_to_plan
 stopped_at: null
 last_updated: "2026-03-11T00:00:00.000Z"
-last_activity: 2026-03-11 — Milestone v0.2 started
+last_activity: 2026-03-11 — Roadmap created for v0.2 (4 phases, 10 requirements)
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,14 +21,31 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-11)
 
 **Core value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
-**Current focus:** Defining requirements for v0.2
+**Current focus:** Phase 4 — Foundation (exit codes + cache normalization)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-11 — Milestone v0.2 started
+Phase: 4 of 7 (Foundation)
+Plan: — (not yet planned)
+Status: Ready to plan
+Last activity: 2026-03-11 — Roadmap created for v0.2
+
+Progress: [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+- Total plans completed: 0 (v0.2)
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
+
+*Updated after each plan completion*
 
 ## Accumulated Context
 
@@ -47,8 +64,11 @@ Carried forward from v1.0:
 - Gemini tool call response shape differences need dedicated integration test
 - `bun build --compile` dynamic import limitation — MCP server packages must NOT be bundled into binary
 
+From research:
+- Vercel AI SDK `onStepFinish` exact field names for tool calls should be verified against `ai@6.0.116` before Phase 7
+
 ## Session Continuity
 
 Last session: 2026-03-11
-Stopped at: Milestone v0.2 started — defining requirements
+Stopped at: Roadmap created — ready to plan Phase 4
 Resume file: None

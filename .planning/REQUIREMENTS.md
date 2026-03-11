@@ -73,22 +73,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ERR-01 | — | Pending |
-| CACHE-01 | — | Pending |
-| CACHE-02 | — | Pending |
-| ERR-02 | — | Pending |
-| FLAG-04 | — | Pending |
-| FLAG-03 | — | Pending |
-| FLAG-01 | — | Pending |
-| FLAG-02 | — | Pending |
-| OBS-01 | — | Pending |
-| OBS-02 | — | Pending |
+| ERR-01 | Phase 4 | Pending |
+| CACHE-01 | Phase 4 | Pending |
+| CACHE-02 | Phase 4 | Pending |
+| ERR-02 | Phase 5 | Pending |
+| FLAG-04 | Phase 5 | Pending |
+| FLAG-03 | Phase 5 | Pending |
+| FLAG-01 | Phase 6 | Pending |
+| FLAG-02 | Phase 7 | Pending |
+| OBS-01 | Phase 7 | Pending |
+| OBS-02 | Phase 7 | Pending |
 
 **Coverage:**
 - v0.2 requirements: 10 total
-- Mapped to phases: 0
-- Unmapped: 10 ⚠️
+- Mapped to phases: 10
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-11*
-*Last updated: 2026-03-11 after initial definition*
+*Last updated: 2026-03-11 after roadmap creation*
