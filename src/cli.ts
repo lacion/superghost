@@ -21,6 +21,7 @@ import {
 import type { ProviderName } from "./agent/model-factory.ts";
 import { executeAgent } from "./agent/agent-runner.ts";
 import picomatch from "picomatch";
+import { checkBaseUrlReachable } from "./infra/preflight.ts";
 import { isStandaloneBinary } from "./dist/paths.ts";
 import { ensureMcpDependencies } from "./dist/setup.ts";
 import pkg from "../package.json";
@@ -81,6 +82,21 @@ program
           await Bun.write(
             Bun.stderr,
             `${pc.red("Error:")} No tests match pattern "${options.only}"\n\nAvailable tests:\n${names}\n`,
+          );
+          setTimeout(() => process.exit(2), 100);
+          return;
+        }
+      }
+
+      // Preflight: check baseUrl reachability (only if global baseUrl configured)
+      if (config.baseUrl) {
+        try {
+          await checkBaseUrlReachable(config.baseUrl);
+        } catch {
+          await Bun.write(
+            Bun.stderr,
+            `${pc.red("Error:")} baseUrl unreachable: ${config.baseUrl}\n` +
+              `  Check that the server is running and the URL is correct.\n`,
           );
           setTimeout(() => process.exit(2), 100);
           return;
