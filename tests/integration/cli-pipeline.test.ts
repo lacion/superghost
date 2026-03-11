@@ -22,45 +22,52 @@ async function runCli(
 }
 
 describe("CLI Pipeline Integration", () => {
-  test("valid config without API key exits 1 with clear error naming env var", async () => {
+  test("valid config without API key exits 2 with clear error naming env var", async () => {
     const { exitCode, stderr } = await runCli(
       ["--config", "tests/fixtures/valid-config.yaml"],
       { OPENAI_API_KEY: "" },
     );
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(2);
     // Should show clear error about missing API key
     // Fixture uses model: gpt-4o / modelProvider: openai
     expect(stderr).toContain("Missing API key");
     expect(stderr).toContain("OPENAI_API_KEY");
   });
 
-  test("missing config file exits 1 with error and hint", async () => {
+  test("missing config file exits 2 with error and hint", async () => {
     const { exitCode, stderr } = await runCli([
       "--config",
       "nonexistent.yaml",
     ]);
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(2);
     expect(stderr).toContain("Config file not found");
     expect(stderr).toContain("superghost --config");
   });
 
-  test("invalid config exits 1 with all validation errors", async () => {
+  test("invalid config exits 2 with all validation errors", async () => {
     const { exitCode, stderr } = await runCli([
       "--config",
       "tests/fixtures/invalid-config.yaml",
     ]);
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(2);
     expect(stderr).toContain("Invalid config");
     expect(stderr).toContain("issue");
   });
 
-  test("bad YAML syntax exits 1 with syntax error", async () => {
+  test("bad YAML syntax exits 2 with syntax error", async () => {
     const { exitCode, stderr } = await runCli([
       "--config",
       "tests/fixtures/bad-syntax.yaml",
     ]);
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(2);
     expect(stderr).toContain("YAML");
+  });
+
+  test("missing --config flag exits 2", async () => {
+    const { exitCode, stderr } = await runCli([]);
+    expect(exitCode).toBe(2);
+    // Commander's required option error should appear in stderr
+    expect(stderr).toContain("--config");
   });
 
   test("--help shows usage and --config option", async () => {
@@ -75,4 +82,10 @@ describe("CLI Pipeline Integration", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("0.1.1");
   });
+
+  // Note: "unhandled exception in action exits 2" is hard to trigger in
+  // integration tests since it requires an exception that doesn't match
+  // ConfigLoadError or "Missing API key". The catch-all is verified by
+  // code inspection: the catch block exits(2) for all remaining paths
+  // with no remaining `throw error`.
 });
