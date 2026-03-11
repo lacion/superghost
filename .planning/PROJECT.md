@@ -26,7 +26,12 @@ Plain English test cases that execute in a real browser, with step caching that 
 
 ### Active
 
-(None — define in next milestone)
+<!-- v0.2: DX Polish + Reliability Hardening -->
+- [ ] CLI flags: `--dry-run`, `--verbose`, `--no-cache`, `--only <pattern>`
+- [ ] Preflight `baseUrl` reachability check before AI execution
+- [ ] Real-time step progress output during AI execution
+- [ ] Distinct exit codes: 0 = pass, 1 = test failure, 2 = config/runtime error
+- [ ] Cache key normalization (whitespace/formatting-insensitive)
 
 ### Out of Scope
 
@@ -37,6 +42,17 @@ Plain English test cases that execute in a real browser, with step caching that 
 - Cloud-hosted execution — local/CI runner only
 - Offline mode — real-time AI execution is core value
 
+## Current Milestone: v0.2 DX Polish + Reliability Hardening
+
+**Goal:** Make SuperGhost debuggable, observable, and resilient — so users can iterate efficiently and CI pipelines get actionable signals.
+
+**Target features:**
+- CLI flags: `--dry-run`, `--verbose`, `--no-cache`, `--only <pattern>`
+- Preflight `baseUrl` reachability check
+- Real-time step progress output
+- Distinct exit codes (0/1/2)
+- Cache key normalization
+
 ## Context
 
 Shipped v1.0 with 3,787 LOC TypeScript across 93 files.
@@ -45,9 +61,9 @@ Built in 1 day (2026-03-10 → 2026-03-11), 3 phases, 9 plans, 63 commits.
 
 Known areas for future work:
 - Parallel test execution for faster suite runs
-- `--no-cache` / `--clear-cache` / `--verbose` / `--output json` CLI flags
-- Test filtering with `--only <pattern>` and `skip` flag in YAML
 - Watch mode for re-running on config file changes
+- JSON/JUnit output formats for CI reporting
+- Cost/token tracking per test run
 
 ## Constraints
 
@@ -73,4 +89,4 @@ Known areas for future work:
 | BUN_BE_BUN=1 for standalone deps | Forces bun behavior in compiled binary | ✓ Good — auto-install MCP deps on first run |
 
 ---
-*Last updated: 2026-03-11 after v1.0 milestone*
+*Last updated: 2026-03-11 after v0.2 milestone start*
