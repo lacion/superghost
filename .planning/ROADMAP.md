@@ -50,11 +50,11 @@ Plans:
   2. Running `--only` with a pattern matching zero tests exits 2 with a message listing available test names
   3. Running `superghost --no-cache` forces fresh AI execution for every test while still writing cache entries on success
   4. CLI exits 2 with a clear "baseUrl unreachable" message if the configured baseUrl cannot be reached via HTTP before any AI execution begins
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
+- [ ] 05-01-PLAN.md — --only glob filter and --no-cache bypass flags
+- [ ] 05-02-PLAN.md — Preflight baseUrl reachability check
 
 ### Phase 6: Dry-Run
 **Goal**: Users can safely preview their test plan and validate config without launching a browser or spending AI tokens
@@ -91,7 +91,7 @@ Plans:
 | 1. Foundation | v1.0 | 3/3 | Complete | 2026-03-11 |
 | 2. Core Engine | v1.0 | 4/4 | Complete | 2026-03-11 |
 | 3. Distribution | v1.0 | 2/2 | Complete | 2026-03-11 |
-| 4. Foundation | v0.2 | 0/2 | Not started | - |
-| 5. Infrastructure + Flags | v0.2 | 0/? | Not started | - |
+| 4. Foundation | v0.2 | 2/2 | Complete | - |
+| 5. Infrastructure + Flags | v0.2 | 0/2 | Not started | - |
 | 6. Dry-Run | v0.2 | 0/? | Not started | - |
 | 7. Observability | v0.2 | 0/? | Not started | - |
