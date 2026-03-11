@@ -8,7 +8,8 @@
   },
   "files": [
     "src/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "bun test",
@@ -36,6 +37,8 @@
     "mcp",
     "cli"
   ],
+  "license": "MIT",
+  "author": "Luis Morales (https://github.com/lacion)",
   "engines": {
     "bun": ">=1.2.0"
   },
@@ -44,7 +47,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/USER/superghost.git"
+    "url": "git+https://github.com/lacion/superghost.git"
+  },
+  "homepage": "https://github.com/lacion/superghost#readme",
+  "bugs": {
+    "url": "https://github.com/lacion/superghost/issues"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

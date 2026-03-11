@@ -23,7 +23,7 @@ superghost --config tests.yaml
 
 ### Standalone binary
 
-Download the latest binary for your platform from [GitHub Releases](https://github.com/USER/superghost/releases).
+Download the latest binary for your platform from [GitHub Releases](https://github.com/lacion/superghost/releases).
 
 ```bash
 chmod +x superghost-darwin-arm64

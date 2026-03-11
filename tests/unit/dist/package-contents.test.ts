@@ -32,8 +32,8 @@ describe("package contents", () => {
       expect(pkg.bin.superghost).toBe("src/cli.ts");
     });
 
-    test("files array contains exactly ['src/', 'README.md']", () => {
-      expect(pkg.files).toEqual(["src/", "README.md"]);
+    test("files array contains exactly ['src/', 'README.md', 'LICENSE']", () => {
+      expect(pkg.files).toEqual(["src/", "README.md", "LICENSE"]);
     });
 
     test("publishConfig.access is 'public'", () => {
