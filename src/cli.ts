@@ -32,6 +32,13 @@ program
   .version(pkg.version)
   .requiredOption("-c, --config <path>", "Path to YAML config file")
   .option("--headed", "Run browser in headed mode (visible browser window)")
+  .exitOverride((err) => {
+    // Commander writes its own error message to stderr.
+    // Re-exit with code 2 for config-class errors (missing required option, unknown option).
+    if (err.exitCode !== 0) {
+      process.exit(2);
+    }
+  })
   .action(async (options: { config: string; headed?: boolean }) => {
     const pm = new ProcessManager();
     setupSignalHandlers(pm);
@@ -113,15 +120,17 @@ program
 
       if (error instanceof ConfigLoadError) {
         Bun.write(Bun.stderr, `${pc.red("Error:")} ${error.message}\n`);
-        setTimeout(() => process.exit(1), 100);
+        setTimeout(() => process.exit(2), 100);
         return;
       }
       if (error instanceof Error && error.message.startsWith("Missing API key")) {
         Bun.write(Bun.stderr, `${pc.red("Error:")} ${error.message}\n`);
-        setTimeout(() => process.exit(1), 100);
+        setTimeout(() => process.exit(2), 100);
         return;
       }
-      throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      await Bun.write(Bun.stderr, `${pc.red("Unexpected error:")} ${msg}\n`);
+      setTimeout(() => process.exit(2), 100);
     }
   });
 
