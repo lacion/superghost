@@ -15,7 +15,7 @@ export function formatDuration(ms: number): string {
 }
 
 /** Write a line of text to stderr */
-function writeStderr(text: string): void {
+export function writeStderr(text: string): void {
   Bun.write(Bun.stderr, text + "\n");
 }
 

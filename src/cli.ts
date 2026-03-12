@@ -5,7 +5,7 @@ import pc from "picocolors";
 import { loadConfig, ConfigLoadError } from "./config/loader.ts";
 import { TestRunner } from "./runner/test-runner.ts";
 import type { ExecuteFn } from "./runner/test-runner.ts";
-import { ConsoleReporter } from "./output/reporter.ts";
+import { ConsoleReporter, writeStderr } from "./output/reporter.ts";
 import { ProcessManager } from "./infra/process-manager.ts";
 import { setupSignalHandlers } from "./infra/signals.ts";
 import { McpManager } from "./agent/mcp-manager.ts";
@@ -25,7 +25,26 @@ import picomatch from "picomatch";
 import { checkBaseUrlReachable } from "./infra/preflight.ts";
 import { isStandaloneBinary } from "./dist/paths.ts";
 import { ensureMcpDependencies } from "./dist/setup.ts";
+import { animateBanner } from "./output/banner.ts";
 import pkg from "../package.json";
+
+/** Print the run header and any stacked annotations to stderr */
+function printRunHeader(testCount: number, totalTestCount: number | undefined, annotations: string[]): void {
+  let header = `\n${pc.bold("superghost")} v${pkg.version} / Running ${testCount}`;
+  if (totalTestCount !== undefined) {
+    header += ` of ${totalTestCount}`;
+  }
+  header += ` test(s)...`;
+  writeStderr(header);
+  writeStderr("");
+
+  for (const annotation of annotations) {
+    writeStderr(pc.dim(`  ${annotation}`));
+  }
+  if (annotations.length > 0) {
+    writeStderr("");
+  }
+}
 
 const program = new Command();
 
@@ -82,10 +101,7 @@ program
 
         if (config.tests.length === 0) {
           const names = allTestNames.map((n) => `  - ${n}`).join("\n");
-          await Bun.write(
-            Bun.stderr,
-            `${pc.red("Error:")} No tests match pattern "${options.only}"\n\nAvailable tests:\n${names}\n`,
-          );
+          writeStderr(`${pc.red("Error:")} No tests match pattern "${options.only}"\n\nAvailable tests:\n${names}`);
           setTimeout(() => process.exit(2), 100);
           return;
         }
@@ -95,20 +111,10 @@ program
       if (options.dryRun) {
         const cacheManager = new CacheManager(config.cacheDir);
 
-        // Print header (same as normal run)
-        let header = `\n${pc.bold("superghost")} v${pkg.version} / Running ${config.tests.length}`;
-        if (options.only) {
-          header += ` of ${totalTestCount}`;
-        }
-        header += ` test(s)...\n`;
-        Bun.write(Bun.stderr, header + "\n");
-
-        // Stacked annotations
-        Bun.write(Bun.stderr, pc.dim("  (dry-run)") + "\n");
-        if (options.only) {
-          Bun.write(Bun.stderr, pc.dim(`  (filtered by --only "${options.only}")`) + "\n");
-        }
-        Bun.write(Bun.stderr, "\n");
+        // Print header with annotations
+        const dryRunAnnotations = ["(dry-run)"];
+        if (options.only) dryRunAnnotations.push(`(filtered by --only "${options.only}")`);
+        printRunHeader(config.tests.length, options.only ? totalTestCount : undefined, dryRunAnnotations);
 
         // Determine max test name length for padding
         const maxNameLen = Math.max(...config.tests.map(t => t.name.length));
@@ -122,11 +128,11 @@ program
           if (entry) cachedCount++;
 
           const paddedName = test.name.padEnd(maxNameLen);
-          Bun.write(Bun.stderr, `  ${i + 1}. ${paddedName}  (${source})\n`);
+          writeStderr(`  ${i + 1}. ${paddedName}  (${source})`);
         }
 
-        Bun.write(Bun.stderr, "\n");
-        Bun.write(Bun.stderr, `${config.tests.length} tests, ${cachedCount} cached\n`);
+        writeStderr("");
+        writeStderr(`${config.tests.length} tests, ${cachedCount} cached`);
 
         setTimeout(() => process.exit(0), 100);
         return;
@@ -137,11 +143,8 @@ program
         try {
           await checkBaseUrlReachable(config.baseUrl);
         } catch {
-          await Bun.write(
-            Bun.stderr,
-            `${pc.red("Error:")} baseUrl unreachable: ${config.baseUrl}\n` +
-              `  Check that the server is running and the URL is correct.\n`,
-          );
+          writeStderr(`${pc.red("Error:")} baseUrl unreachable: ${config.baseUrl}`);
+          writeStderr(`  Check that the server is running and the URL is correct.`);
           setTimeout(() => process.exit(2), 100);
           return;
         }
@@ -188,29 +191,11 @@ program
       const executeFn: ExecuteFn = async (testCase, baseUrl, testContext?) =>
         executor.execute(testCase, baseUrl, testContext);
 
-      let header = `\n${pc.bold("superghost")} v${pkg.version} / Running ${config.tests.length}`;
-      if (options.only) {
-        header += ` of ${totalTestCount}`;
-      }
-      header += ` test(s)...\n`;
-      Bun.write(Bun.stderr, header + "\n");
-
-      let hasAnnotation = false;
-      if (options.only) {
-        Bun.write(Bun.stderr, pc.dim(`  (filtered by --only "${options.only}")`) + "\n");
-        hasAnnotation = true;
-      }
-      if (!options.cache) {
-        Bun.write(Bun.stderr, pc.dim("  (cache disabled)") + "\n");
-        hasAnnotation = true;
-      }
-      if (options.verbose) {
-        Bun.write(Bun.stderr, pc.dim("  (verbose)") + "\n");
-        hasAnnotation = true;
-      }
-      if (hasAnnotation) {
-        Bun.write(Bun.stderr, "\n");
-      }
+      const runAnnotations: string[] = [];
+      if (options.only) runAnnotations.push(`(filtered by --only "${options.only}")`);
+      if (!options.cache) runAnnotations.push("(cache disabled)");
+      if (options.verbose) runAnnotations.push("(verbose)");
+      printRunHeader(config.tests.length, options.only ? totalTestCount : undefined, runAnnotations);
 
       const runner = new TestRunner(config, reporter, executeFn);
       const result = await runner.run();
@@ -227,21 +212,25 @@ program
       await pm.killAll();
 
       if (error instanceof ConfigLoadError) {
-        Bun.write(Bun.stderr, `${pc.red("Error:")} ${error.message}\n`);
+        writeStderr(`${pc.red("Error:")} ${error.message}`);
         setTimeout(() => process.exit(2), 100);
         return;
       }
       if (error instanceof Error && error.message.startsWith("Missing API key")) {
-        Bun.write(Bun.stderr, `${pc.red("Error:")} ${error.message}\n`);
+        writeStderr(`${pc.red("Error:")} ${error.message}`);
         setTimeout(() => process.exit(2), 100);
         return;
       }
       const msg = error instanceof Error ? error.message : String(error);
-      await Bun.write(Bun.stderr, `${pc.red("Unexpected error:")} ${msg}\n`);
+      writeStderr(`${pc.red("Unexpected error:")} ${msg}`);
       setTimeout(() => process.exit(2), 100);
     }
   });
 
 (async () => {
+  const isHelpRequest = process.argv.includes("--help") || process.argv.includes("-h");
+  if (isHelpRequest) {
+    await animateBanner();
+  }
   await program.parseAsync();
 })();

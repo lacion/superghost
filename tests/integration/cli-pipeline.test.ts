@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 /**
  * Run the CLI as a subprocess, capturing stdout, stderr, and exit code.
@@ -77,10 +77,10 @@ describe("CLI Pipeline Integration", () => {
     expect(stdout).toContain("superghost");
   });
 
-  test("--version shows 0.1.1", async () => {
+  test("--version shows 0.2.0", async () => {
     const { exitCode, stdout } = await runCli(["--version"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("0.1.1");
+    expect(stdout).toContain("0.2.0");
   });
 
   test("--no-cache flag is accepted (exits 2 for missing API key, not unknown option)", async () => {

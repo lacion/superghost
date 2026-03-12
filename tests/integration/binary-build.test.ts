@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "../..");
@@ -64,7 +64,7 @@ describe("Binary Build Integration", () => {
       await new Response(proc.stderr).text();
       const exitCode = await proc.exited;
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("0.1.1");
+      expect(stdout).toContain("0.2.0");
     },
     30_000,
   );

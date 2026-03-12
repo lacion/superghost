@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 
 const ROOT = `${import.meta.dir}/../../..`;
 
@@ -14,8 +14,8 @@ describe("package contents", () => {
       expect(pkg.name).toBe("superghost");
     });
 
-    test("version is '0.1.1'", () => {
-      expect(pkg.version).toBe("0.1.1");
+    test("version is '0.2.0'", () => {
+      expect(pkg.version).toBe("0.2.0");
     });
 
     test("has description", () => {

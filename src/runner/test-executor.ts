@@ -74,7 +74,7 @@ export class TestExecutor {
     if (!this.noCache) {
       const cached = await this.cacheManager.load(testCase, baseUrl);
       if (cached) {
-        const replay = await this.replayer.replay(cached.steps);
+        const replay = await this.replayer.replay(cached.steps, this.onStepProgress);
         if (replay.success) {
           return {
             testName: testCase,

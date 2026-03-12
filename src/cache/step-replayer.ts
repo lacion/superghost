@@ -1,4 +1,6 @@
 import type { CachedStep } from "./types.ts";
+import type { OnStepProgress } from "../output/types.ts";
+import { describeToolCall } from "../output/tool-name-map.ts";
 
 /** Function signature for executing a tool by name with given input */
 export type ToolExecutor = (
@@ -30,13 +32,19 @@ export class StepReplayer {
    * @param steps - The cached steps to replay
    * @returns Result indicating success or failure with details
    */
-  async replay(steps: CachedStep[]): Promise<ReplayResult> {
+  async replay(steps: CachedStep[], onStepProgress?: OnStepProgress): Promise<ReplayResult> {
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       if (!step) continue;
 
       try {
         await this.executor(step.toolName, step.toolInput);
+        onStepProgress?.({
+          stepNumber: i + 1,
+          toolName: step.toolName,
+          input: step.toolInput,
+          description: describeToolCall(step.toolName, step.toolInput),
+        });
       } catch (error) {
         return {
           success: false,

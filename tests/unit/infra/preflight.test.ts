@@ -1,9 +1,7 @@
 import { describe, test, expect, afterAll } from "bun:test";
 import { checkBaseUrlReachable } from "../../../src/infra/preflight.ts";
-import type { Server } from "bun";
-
 describe("checkBaseUrlReachable", () => {
-  const servers: Server[] = [];
+  const servers: ReturnType<typeof Bun.serve>[] = [];
 
   afterAll(() => {
     for (const s of servers) s.stop(true);
