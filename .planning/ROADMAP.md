@@ -120,7 +120,7 @@ Note: Phases 14 and 15 are technically independent but sequenced for implementat
 | 7. Observability | v0.2 | 2/2 | Complete | 2026-03-12 |
 | 8. Biome Setup | v0.3 | 1/1 | Complete | 2026-03-12 |
 | 9. JSON Output | v0.3 | 1/1 | Complete | 2026-03-12 |
-| 14. JUnit XML Output | 1/1 | Complete   | 2026-03-12 | - |
+| 14. JUnit XML Output | 1/1 | Complete    | 2026-03-12 | - |
 | 15. Env Var Interpolation | v0.4 | 0/1 | Not started | - |
 | 16. GitHub Actions PR Workflow | v0.4 | 0/1 | Not started | - |
 | 17. Contributor Docs | v0.4 | 0/1 | Not started | - |
