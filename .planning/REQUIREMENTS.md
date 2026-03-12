@@ -114,31 +114,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CACHE-02 | Phase 4 (v0.2) | Complete |
 | OBS-01 | Phase 7 (v0.2) | Complete |
 | OBS-02 | Phase 7 (v0.2) | Complete |
-| LINT-01 | — | Pending |
-| LINT-02 | — | Pending |
-| LINT-03 | — | Pending |
-| OUT-01 | — | Pending |
-| OUT-02 | — | Pending |
-| OUT-03 | — | Pending |
-| OUT-04 | — | Pending |
-| OUT-05 | — | Pending |
-| CFG-01 | — | Pending |
-| CFG-02 | — | Pending |
-| CFG-03 | — | Pending |
-| CFG-04 | — | Pending |
-| CI-01 | — | Pending |
-| CI-02 | — | Pending |
-| CI-03 | — | Pending |
-| CONTRIB-01 | — | Pending |
-| CONTRIB-02 | — | Pending |
-| CONTRIB-03 | — | Pending |
-| CONTRIB-04 | — | Pending |
+| LINT-01 | Phase 8 (v0.3) | Pending |
+| LINT-02 | Phase 8 (v0.3) | Pending |
+| LINT-03 | Phase 8 (v0.3) | Pending |
+| OUT-01 | Phase 9 (v0.3) | Pending |
+| OUT-03 | Phase 9 (v0.3) | Pending |
+| OUT-04 | Phase 9 (v0.3) | Pending |
+| OUT-02 | Phase 10 (v0.3) | Pending |
+| OUT-05 | Phase 10 (v0.3) | Pending |
+| CFG-01 | Phase 11 (v0.3) | Pending |
+| CFG-02 | Phase 11 (v0.3) | Pending |
+| CFG-03 | Phase 11 (v0.3) | Pending |
+| CFG-04 | Phase 11 (v0.3) | Pending |
+| CI-01 | Phase 12 (v0.3) | Pending |
+| CI-02 | Phase 12 (v0.3) | Pending |
+| CI-03 | Phase 12 (v0.3) | Pending |
+| CONTRIB-01 | Phase 13 (v0.3) | Pending |
+| CONTRIB-02 | Phase 13 (v0.3) | Pending |
+| CONTRIB-03 | Phase 13 (v0.3) | Pending |
+| CONTRIB-04 | Phase 13 (v0.3) | Pending |
 
 **Coverage:**
-- v0.3 requirements: 19 total
-- Mapped to phases: 0 (pending roadmap creation)
-- Unmapped: 19
+- v0.2 requirements: 10 total, 10 complete
+- v0.3 requirements: 19 total, 19 mapped to phases, 0 orphaned
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-11*
-*Last updated: 2026-03-12 after v0.3 requirements definition*
+*Last updated: 2026-03-12 after v0.3 roadmap creation*

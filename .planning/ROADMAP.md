@@ -3,12 +3,13 @@
 ## Milestones
 
 - ✅ **v1.0 MVP** — Phases 1-3 (shipped 2026-03-11)
-- 🚧 **v0.2 DX Polish + Reliability Hardening** — Phases 4-7 (in progress)
+- ✅ **v0.2 DX Polish + Reliability Hardening** — Phases 4-7 (shipped 2026-03-12)
+- 🚧 **v0.3 CI/CD + Team Readiness** — Phases 8-13 (in progress)
 
 ## Phases
 
 <details>
-<summary>✅ v1.0 MVP (Phases 1-3) — SHIPPED 2026-03-11</summary>
+<summary>v1.0 MVP (Phases 1-3) — SHIPPED 2026-03-11</summary>
 
 - [x] Phase 1: Foundation (3/3 plans) — completed 2026-03-11
 - [x] Phase 2: Core Engine (4/4 plans) — completed 2026-03-11
@@ -16,82 +17,128 @@
 
 </details>
 
-### 🚧 v0.2 DX Polish + Reliability Hardening
+<details>
+<summary>v0.2 DX Polish + Reliability Hardening (Phases 4-7) — SHIPPED 2026-03-12</summary>
 
-**Milestone Goal:** Make SuperGhost debuggable, observable, and resilient so users can iterate efficiently and CI pipelines get actionable signals.
+- [x] Phase 4: Foundation (2/2 plans) — completed 2026-03-12
+- [x] Phase 5: Infrastructure + Flags (2/2 plans) — completed 2026-03-12
+- [x] Phase 6: Dry-Run (1/1 plans) — completed 2026-03-12
+- [x] Phase 7: Observability (2/2 plans) — completed 2026-03-12
 
-- [x] **Phase 4: Foundation** — Distinct exit codes and cache key normalization
-- [ ] **Phase 5: Infrastructure + Flags** — Preflight reachability, --only filter, --no-cache bypass
-- [ ] **Phase 6: Dry-Run** — Config-validating test preview without AI execution
-- [ ] **Phase 7: Observability** — Verbose mode and real-time step progress
+</details>
+
+### 🚧 v0.3 CI/CD + Team Readiness
+
+**Milestone Goal:** Make SuperGhost production-ready for teams — structured CI output, enforced code quality, contributor onboarding, and flexible config.
+
+- [ ] **Phase 8: Biome Setup** — Linting, formatting, and import sorting baseline for the entire codebase
+- [ ] **Phase 9: JSON Output** — Machine-readable JSON results via `--output json` for programmatic consumption
+- [ ] **Phase 10: JUnit XML Output** — CI-standard JUnit XML results via `--output junit` for test reporting
+- [ ] **Phase 11: Env Var Interpolation** — `${VAR}` syntax in YAML configs for CI-safe secret injection
+- [ ] **Phase 12: GitHub Actions PR Workflow** — Lint, typecheck, and test gates on every PR
+- [ ] **Phase 13: Contributor Docs** — CONTRIBUTING.md, SECURITY.md, issue/PR templates for team onboarding
 
 ## Phase Details
 
-### Phase 4: Foundation
-**Goal**: CI pipelines get actionable exit code signals and cache hits are resilient across platforms and formatting differences
-**Depends on**: Phase 3 (v1.0 shipped)
-**Requirements**: ERR-01, CACHE-01, CACHE-02
+### Phase 8: Biome Setup
+**Goal**: All project code enforces consistent style through a single linting and formatting tool, establishing the quality baseline before any v0.3 feature code
+**Depends on**: Phase 7 (v0.2 complete)
+**Requirements**: LINT-01, LINT-02, LINT-03
 **Success Criteria** (what must be TRUE):
-  1. CLI exits 0 when all tests pass, 1 when any test fails, and 2 when config is invalid or a runtime error occurs before test execution
-  2. Two test cases differing only in whitespace or Unicode normalization form (NFD vs NFC) produce the same cache key and share cached results
-  3. Existing v1 cache entries are cleanly bypassed (not erroneously matched) due to the v2 version prefix in new cache keys
-**Plans:** 2 plans
+  1. Running `bun run lint` checks the entire codebase for style violations and reports any issues without modifying files
+  2. Running `bun run lint:fix` auto-fixes all fixable violations (formatting, import sorting) in place
+  3. The full existing codebase (all `.ts` files) passes `bun run lint` with zero violations after a one-time formatting commit
+  4. A single `biome.json` at the project root configures all linting, formatting, and import sorting rules
+**Plans**: TBD
 
 Plans:
-- [x] 04-01-PLAN.md — POSIX exit code taxonomy (0/1/2) in cli.ts
-- [x] 04-02-PLAN.md — Cache key normalization + v2 prefix + v1 migration
+- [ ] 08-01: Biome installation, config, npm scripts, and codebase formatting baseline
 
-### Phase 5: Infrastructure + Flags
-**Goal**: Users can filter tests, bypass cache, and get fast failure on unreachable servers before wasting time on AI execution
-**Depends on**: Phase 4 (exit code taxonomy must be locked before features emit exit 2)
-**Requirements**: ERR-02, FLAG-04, FLAG-03
+### Phase 9: JSON Output
+**Goal**: Users can pipe SuperGhost results to `jq`, scripts, or CI tools via a machine-readable JSON format on stdout while still seeing human-readable progress on stderr
+**Depends on**: Phase 8 (code must be lint-clean before adding feature code)
+**Requirements**: OUT-01, OUT-03, OUT-04
 **Success Criteria** (what must be TRUE):
-  1. Running `superghost --only "login*"` executes only tests whose names match the glob pattern and skips the rest
-  2. Running `--only` with a pattern matching zero tests exits 2 with a message listing available test names
-  3. Running `superghost --no-cache` forces fresh AI execution for every test while still writing cache entries on success
-  4. CLI exits 2 with a clear "baseUrl unreachable" message if the configured baseUrl cannot be reached via HTTP before any AI execution begins
-**Plans:** 2 plans
+  1. Running `superghost --output json --config tests.yaml` produces a single valid JSON object on stdout containing `version`, `success`, and full test results
+  2. Human-readable progress output (spinners, step descriptions) continues on stderr simultaneously when `--output json` is active
+  3. Commander.js help (`--help`) and version (`--version`) output is written to stderr, never stdout, so piping `--output json` through `JSON.parse()` never fails due to non-JSON preamble
+**Plans**: TBD
 
 Plans:
-- [ ] 05-01-PLAN.md — --only glob filter and --no-cache bypass flags
-- [ ] 05-02-PLAN.md — Preflight baseUrl reachability check
+- [ ] 09-01: --output flag infrastructure, JSON formatter, Commander stdout redirect, integration tests
 
-### Phase 6: Dry-Run
-**Goal**: Users can safely preview their test plan and validate config without launching a browser or spending AI tokens
-**Depends on**: Phase 5 (preflight and filter flags established; dry-run must not run preflight)
-**Requirements**: FLAG-01
+### Phase 10: JUnit XML Output
+**Goal**: CI systems (GitHub Actions, Jenkins, GitLab) can consume SuperGhost results as JUnit XML for native test reporting and PR annotations
+**Depends on**: Phase 9 (reuses --output flag infrastructure and batch-formatter architecture)
+**Requirements**: OUT-02, OUT-05
 **Success Criteria** (what must be TRUE):
-  1. Running `superghost --dry-run` lists all test names with their source (cache/AI) without executing any tests or launching a browser
-  2. Dry-run still validates config (YAML parsing, Zod schema, API key presence) and exits 2 on config errors, so it never lies about whether a real run would succeed
-**Plans:** 1 plan
+  1. Running `superghost --output junit --config tests.yaml` produces valid JUnit XML on stdout with `<testsuite>` and `<testcase>` elements including `classname` attribute and `time` in seconds
+  2. Each `<testcase>` element includes `<properties>` with SuperGhost-specific metadata: `source` (cache or ai) and `selfHealed` (true/false)
+  3. Test names containing XML-special characters (`<`, `>`, `&`, `"`, `'`) are properly escaped in the output
+**Plans**: TBD
 
 Plans:
-- [ ] 06-01-PLAN.md — TDD: --dry-run flag with test preview and config validation
+- [ ] 10-01: JUnit XML formatter with escapeXml, classname, properties metadata, integration tests
 
-### Phase 7: Observability
-**Goal**: Users get real-time feedback during AI execution and all progress output is CI-safe
-**Depends on**: Phase 6 (Reporter dry-run changes must be in place before verbose mode modifies Reporter)
-**Requirements**: FLAG-02, OBS-01, OBS-02
+### Phase 11: Env Var Interpolation
+**Goal**: Users can inject environment variables into YAML configs so CI pipelines pass secrets and environment-specific values without hardcoding
+**Depends on**: Phase 8 (lint enforcement; independent of output format phases)
+**Requirements**: CFG-01, CFG-02, CFG-03, CFG-04
 **Success Criteria** (what must be TRUE):
-  1. Running `superghost --verbose` prints per-step tool call descriptions (e.g., "Step 3: Navigating to page", "Step 4: Clicking button") to stderr during AI execution
-  2. Without --verbose, the CLI shows real-time step progress updates on the spinner (tool call names mapped to human descriptions) during AI execution
-  3. All progress and spinner output routes to stderr (never stdout), and ANSI codes are suppressed in non-TTY environments (pipes, CI)
-**Plans:** 2 plans
+  1. A YAML config containing `baseUrl: ${BASE_URL}` resolves to the value of the `BASE_URL` environment variable at runtime
+  2. A YAML config containing `baseUrl: ${BASE_URL:-http://localhost:3000}` uses the fallback value when `BASE_URL` is not set
+  3. A YAML config containing `apiKey: ${API_KEY:?API_KEY must be set}` exits with code 2 and the descriptive error message when `API_KEY` is not set
+  4. Env var values containing YAML-special characters (`:`, `#`, `{`, `[`) do not break config parsing because interpolation runs on the parsed JS object, not the raw YAML string
+**Plans**: TBD
 
 Plans:
-- [x] 07-01-PLAN.md — Types, tool-name-map, and callback plumbing (agent-runner + test-executor)
-- [ ] 07-02-PLAN.md — Reporter verbose/progress, CLI --verbose flag, stderr migration
+- [ ] 11-01: Post-parse interpolation engine with ${VAR}, ${VAR:-default}, ${VAR:?error} syntax and unit tests
+
+### Phase 12: GitHub Actions PR Workflow
+**Goal**: Every pull request and push to main is automatically checked for lint violations, type errors, and test failures before merge
+**Depends on**: Phase 8 (lint job requires Biome to exist)
+**Requirements**: CI-01, CI-02, CI-03
+**Success Criteria** (what must be TRUE):
+  1. Opening a PR or pushing to main triggers a GitHub Actions workflow that runs lint, typecheck, and test jobs in parallel
+  2. A single `gate` job aggregates all three check jobs, so branch protection requires only one status check name (not fragile per-job names)
+  3. CI installs dependencies with `bun install --frozen-lockfile` so builds are reproducible and fail on lockfile drift
+**Plans**: TBD
+
+Plans:
+- [ ] 12-01: ci.yml workflow with parallel lint/typecheck/test jobs and gate aggregation
+
+### Phase 13: Contributor Docs
+**Goal**: A new contributor can find setup instructions, understand the PR process, report bugs, and know how to disclose security issues without asking anyone
+**Depends on**: Phases 8-12 (documents the final tooling and workflow state)
+**Requirements**: CONTRIB-01, CONTRIB-02, CONTRIB-03, CONTRIB-04
+**Success Criteria** (what must be TRUE):
+  1. CONTRIBUTING.md documents dev setup, linting commands, testing commands, and the PR process using `bun`/`bunx` commands (never npm/npx)
+  2. SECURITY.md provides a real security contact email and an acknowledgment commitment timeline
+  3. GitHub issue templates for bug reports and feature requests use YAML form format and appear in the "New Issue" chooser
+  4. A PR template with a checklist for tests, lint, and description auto-populates when opening a new pull request
+**Plans**: TBD
+
+Plans:
+- [ ] 13-01: CONTRIBUTING.md, SECURITY.md, issue templates, and PR template
 
 ## Progress
 
-**Execution Order:** Phases 4 → 5 → 6 → 7
+**Execution Order:** Phases 8 -> 9 -> 10 -> 11 -> 12 -> 13
+
+Note: Phase 11 depends only on Phase 8 (not 9 or 10), but is sequenced after output format phases per research recommendations.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 1. Foundation | v1.0 | 3/3 | Complete | 2026-03-11 |
 | 2. Core Engine | v1.0 | 4/4 | Complete | 2026-03-11 |
 | 3. Distribution | v1.0 | 2/2 | Complete | 2026-03-11 |
-| 4. Foundation | v0.2 | 2/2 | Complete | - |
-| 5. Infrastructure + Flags | v0.2 | 0/2 | Not started | - |
-| 6. Dry-Run | v0.2 | 0/1 | Not started | - |
-| 7. Observability | v0.2 | 1/2 | In Progress | - |
+| 4. Foundation | v0.2 | 2/2 | Complete | 2026-03-12 |
+| 5. Infrastructure + Flags | v0.2 | 2/2 | Complete | 2026-03-12 |
+| 6. Dry-Run | v0.2 | 1/1 | Complete | 2026-03-12 |
+| 7. Observability | v0.2 | 2/2 | Complete | 2026-03-12 |
+| 8. Biome Setup | v0.3 | 0/1 | Not started | - |
+| 9. JSON Output | v0.3 | 0/1 | Not started | - |
+| 10. JUnit XML Output | v0.3 | 0/1 | Not started | - |
+| 11. Env Var Interpolation | v0.3 | 0/1 | Not started | - |
+| 12. GitHub Actions PR Workflow | v0.3 | 0/1 | Not started | - |
+| 13. Contributor Docs | v0.3 | 0/1 | Not started | - |
