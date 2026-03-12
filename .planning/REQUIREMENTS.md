@@ -3,9 +3,7 @@
 **Defined:** 2026-03-11
 **Core Value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
 
-## v0.2 Requirements
-
-Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap phases.
+## v0.2 Requirements (Complete)
 
 ### CLI Flags
 
@@ -29,16 +27,47 @@ Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap ph
 - [x] **OBS-01**: CLI shows real-time step progress during AI execution (tool call names mapped to human descriptions)
 - [x] **OBS-02**: All progress/spinner output routes to stderr (not stdout), with TTY detection gating ANSI output
 
+## v0.3 Requirements
+
+Requirements for v0.3 CI/CD + Team Readiness. Each maps to roadmap phases.
+
+### Linting & Formatting
+
+- [ ] **LINT-01**: Project uses Biome for linting, formatting, and import sorting with a single `biome.json` config
+- [ ] **LINT-02**: `bun run lint` checks code style and `bun run lint:fix` auto-fixes violations
+- [ ] **LINT-03**: All existing code passes Biome checks after initial formatting baseline commit
+
+### Output Formats
+
+- [ ] **OUT-01**: User can run `--output json` to get machine-readable JSON results on stdout with `version`, `success`, and full test results
+- [ ] **OUT-02**: User can run `--output junit` to get JUnit XML on stdout with `classname` attribute and `time` in seconds
+- [ ] **OUT-03**: Human-readable progress on stderr runs simultaneously with structured output on stdout (no mode switching)
+- [ ] **OUT-04**: Commander.js help/version output is redirected to stderr so it never corrupts structured stdout output
+- [ ] **OUT-05**: JUnit XML includes `<properties>` per testcase with SuperGhost-specific metadata (source: cache/ai, selfHealed)
+
+### Config
+
+- [ ] **CFG-01**: User can use `${VAR}` syntax in YAML config values to interpolate environment variables
+- [ ] **CFG-02**: User can use `${VAR:-default}` syntax to provide fallback values for unset env vars
+- [ ] **CFG-03**: User can use `${VAR:?error message}` syntax to require env vars with descriptive error on missing
+- [ ] **CFG-04**: Env var interpolation runs post-YAML-parse (on JS object) so YAML-special characters in values don't break parsing
+
+### CI/CD
+
+- [ ] **CI-01**: GitHub Actions `ci.yml` runs lint, typecheck, and test jobs in parallel on PRs and pushes to main
+- [ ] **CI-02**: A single `gate` job aggregates all CI checks for branch protection (avoids check name fragility)
+- [ ] **CI-03**: CI uses `bun install --frozen-lockfile` for reproducible installs
+
+### Contributor Readiness
+
+- [ ] **CONTRIB-01**: CONTRIBUTING.md documents dev setup, linting, testing, and PR process using bun/bunx commands
+- [ ] **CONTRIB-02**: SECURITY.md provides a real security contact and acknowledgment commitment
+- [ ] **CONTRIB-03**: GitHub issue templates (bug report, feature request) use YAML form format
+- [ ] **CONTRIB-04**: PR template includes checklist for tests, lint, and description
+
 ## Future Requirements
 
 Deferred to later milestones. Tracked but not in current roadmap.
-
-### CI/CD Integration (v0.3)
-
-- **CI-01**: JSON output format (`--output json`)
-- **CI-02**: JUnit XML output format (`--output junit`)
-- **CI-03**: PR workflow with test gates
-- **CI-04**: Linting/formatting enforcement
 
 ### Advanced Execution (v0.4)
 
@@ -60,12 +89,14 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| `--watch` mode | Comparable complexity to entire v0.2 milestone; use `nodemon` interim |
-| `--bail` / fail-fast | Cross-cuts runner and cache lifecycle; complex edge cases |
-| JSON/JUnit output | Full reporter refactor, not a DX flag; defer to v0.3 |
+| `--output-file <path>` flag | Shell redirection (`> results.xml`) handles this; add only if users request |
+| TAP output format | Poor CI adoption; JSON + JUnit cover all real-world needs |
+| Multiple simultaneous output formats | Complexity with near-zero demand; cached replay makes second run instant |
+| HTML report output | Allure and similar tools consume JUnit XML to generate HTML |
+| ESLint + Prettier | Biome replaces 5+ packages with one; no reason to use ESLint |
+| E2E tests in PR gate | Requires API keys, too slow, non-deterministic; keep on workflow_dispatch |
+| `--watch` mode | Comparable complexity to entire milestone; use `nodemon` interim |
 | Token/cost tracking | Requires per-provider cost tables; defer to v0.5 |
-| Per-test baseUrl preflight | Only check global baseUrl at startup; per-test failures surface as test failures |
-| Config file env var interpolation | Adds config complexity; defer to v0.3+ |
 
 ## Traceability
 
@@ -73,22 +104,41 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ERR-01 | Phase 4 | Complete |
-| CACHE-01 | Phase 4 | Complete |
-| CACHE-02 | Phase 4 | Complete |
-| ERR-02 | Phase 5 | Complete |
-| FLAG-04 | Phase 5 | Complete |
-| FLAG-03 | Phase 5 | Complete |
-| FLAG-01 | Phase 6 | Complete |
-| FLAG-02 | Phase 7 | Complete |
-| OBS-01 | Phase 7 | Complete |
-| OBS-02 | Phase 7 | Complete |
+| FLAG-01 | Phase 6 (v0.2) | Complete |
+| FLAG-02 | Phase 7 (v0.2) | Complete |
+| FLAG-03 | Phase 5 (v0.2) | Complete |
+| FLAG-04 | Phase 5 (v0.2) | Complete |
+| ERR-01 | Phase 4 (v0.2) | Complete |
+| ERR-02 | Phase 5 (v0.2) | Complete |
+| CACHE-01 | Phase 4 (v0.2) | Complete |
+| CACHE-02 | Phase 4 (v0.2) | Complete |
+| OBS-01 | Phase 7 (v0.2) | Complete |
+| OBS-02 | Phase 7 (v0.2) | Complete |
+| LINT-01 | — | Pending |
+| LINT-02 | — | Pending |
+| LINT-03 | — | Pending |
+| OUT-01 | — | Pending |
+| OUT-02 | — | Pending |
+| OUT-03 | — | Pending |
+| OUT-04 | — | Pending |
+| OUT-05 | — | Pending |
+| CFG-01 | — | Pending |
+| CFG-02 | — | Pending |
+| CFG-03 | — | Pending |
+| CFG-04 | — | Pending |
+| CI-01 | — | Pending |
+| CI-02 | — | Pending |
+| CI-03 | — | Pending |
+| CONTRIB-01 | — | Pending |
+| CONTRIB-02 | — | Pending |
+| CONTRIB-03 | — | Pending |
+| CONTRIB-04 | — | Pending |
 
 **Coverage:**
-- v0.2 requirements: 10 total
-- Mapped to phases: 10
-- Unmapped: 0
+- v0.3 requirements: 19 total
+- Mapped to phases: 0 (pending roadmap creation)
+- Unmapped: 19
 
 ---
 *Requirements defined: 2026-03-11*
-*Last updated: 2026-03-11 after roadmap creation*
+*Last updated: 2026-03-12 after v0.3 requirements definition*
