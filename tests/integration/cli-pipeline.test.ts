@@ -186,17 +186,17 @@ describe("CLI Pipeline Integration", () => {
     });
 
     test("--dry-run lists tests with source labels", async () => {
-      const { exitCode, stdout } = await runCli(
+      const { exitCode, stderr } = await runCli(
         ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"],
         { OPENAI_API_KEY: "fake-key" },
       );
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("Login Flow");
-      expect(stdout).toContain("Login Error");
-      expect(stdout).toContain("Dashboard Load");
-      expect(stdout).toContain("Checkout Process");
-      expect(stdout).toContain("(ai)");
-      expect(stdout).toContain("4 tests, 0 cached");
+      expect(stderr).toContain("Login Flow");
+      expect(stderr).toContain("Login Error");
+      expect(stderr).toContain("Dashboard Load");
+      expect(stderr).toContain("Checkout Process");
+      expect(stderr).toContain("(ai)");
+      expect(stderr).toContain("4 tests, 0 cached");
     });
 
     test("--dry-run detects cached tests", async () => {
@@ -245,14 +245,14 @@ describe("CLI Pipeline Integration", () => {
         ].join("\n"),
       );
 
-      const { exitCode, stdout } = await runCli(
+      const { exitCode, stderr } = await runCli(
         ["--config", tmpConfig, "--dry-run"],
         { OPENAI_API_KEY: "fake-key" },
       );
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("(cache)");
-      expect(stdout).toContain("(ai)");
-      expect(stdout).toContain("2 tests, 1 cached");
+      expect(stderr).toContain("(cache)");
+      expect(stderr).toContain("(ai)");
+      expect(stderr).toContain("2 tests, 1 cached");
     });
 
     test("--dry-run validates config (exits 2 on bad YAML)", async () => {
@@ -298,7 +298,7 @@ describe("CLI Pipeline Integration", () => {
     });
 
     test("--dry-run + --only filters then lists", async () => {
-      const { exitCode, stdout } = await runCli(
+      const { exitCode, stderr } = await runCli(
         [
           "--config",
           "tests/fixtures/multi-test-config.yaml",
@@ -309,21 +309,50 @@ describe("CLI Pipeline Integration", () => {
         { OPENAI_API_KEY: "fake-key" },
       );
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("Login Flow");
-      expect(stdout).toContain("Login Error");
-      expect(stdout).not.toContain("Dashboard Load");
-      expect(stdout).not.toContain("Checkout Process");
-      expect(stdout).toContain("2 tests");
-      expect(stdout).toMatch(/of 4/);
+      expect(stderr).toContain("Login Flow");
+      expect(stderr).toContain("Login Error");
+      expect(stderr).not.toContain("Dashboard Load");
+      expect(stderr).not.toContain("Checkout Process");
+      expect(stderr).toContain("2 tests");
+      expect(stderr).toMatch(/of 4/);
     });
 
     test("--dry-run shows header with dry-run annotation", async () => {
-      const { exitCode, stdout } = await runCli(
+      const { exitCode, stderr } = await runCli(
         ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"],
         { OPENAI_API_KEY: "fake-key" },
       );
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("(dry-run)");
+      expect(stderr).toContain("(dry-run)");
+    });
+
+    test("dry-run output goes to stderr, stdout is empty", async () => {
+      const { exitCode, stdout, stderr } = await runCli(
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("(dry-run)");
+      expect(stderr).toContain("Login Flow");
+    });
+  });
+
+  describe("verbose", () => {
+    test("--help shows --verbose option", async () => {
+      const { exitCode, stdout } = await runCli(["--help"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("--verbose");
+    });
+
+    test("--verbose flag is accepted (exits 2 for missing API key, not unknown option)", async () => {
+      const { exitCode, stderr } = await runCli(
+        ["--config", "tests/fixtures/valid-config.yaml", "--verbose"],
+        { OPENAI_API_KEY: "" },
+      );
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain("Missing API key");
+      expect(stderr).not.toContain("unknown option");
     });
   });
 });

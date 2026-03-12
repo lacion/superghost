@@ -102,6 +102,7 @@ describe("ConsoleReporter", () => {
         passed: 2,
         failed: 0,
         cached: 1,
+        skipped: 0,
       };
 
       reporter.onRunComplete(runResult);
@@ -140,6 +141,7 @@ describe("ConsoleReporter", () => {
         passed: 2,
         failed: 1,
         cached: 1,
+        skipped: 0,
       };
 
       reporter.onRunComplete(runResult);
@@ -163,6 +165,7 @@ describe("ConsoleReporter", () => {
         passed: 0,
         failed: 0,
         cached: 0,
+        skipped: 0,
       };
 
       reporter.onRunComplete(runResult);
@@ -203,6 +206,7 @@ describe("ConsoleReporter", () => {
         passed: 1,
         failed: 2,
         cached: 0,
+        skipped: 0,
       };
 
       reporter.onRunComplete(runResult);
@@ -355,6 +359,7 @@ describe("ConsoleReporter", () => {
         passed: 0,
         failed: 0,
         cached: 0,
+        skipped: 0,
       };
 
       reporter.onRunComplete(runResult);

@@ -20,6 +20,7 @@ import {
 } from "./agent/model-factory.ts";
 import type { ProviderName } from "./agent/model-factory.ts";
 import { executeAgent } from "./agent/agent-runner.ts";
+import type { OnStepProgress } from "./output/types.ts";
 import picomatch from "picomatch";
 import { checkBaseUrlReachable } from "./infra/preflight.ts";
 import { isStandaloneBinary } from "./dist/paths.ts";
@@ -37,6 +38,7 @@ program
   .option("--only <pattern>", "Run only tests matching glob pattern")
   .option("--no-cache", "Bypass cache reads (still writes on success)")
   .option("--dry-run", "List tests and validate config without executing")
+  .option("--verbose", "Show per-step tool call output during execution")
   .exitOverride((err) => {
     // Commander writes its own error message to stderr.
     // Re-exit with code 2 for config-class errors (missing required option, unknown option).
@@ -44,7 +46,7 @@ program
       process.exit(2);
     }
   })
-  .action(async (options: { config: string; headed?: boolean; only?: string; cache: boolean; dryRun?: boolean }) => {
+  .action(async (options: { config: string; headed?: boolean; only?: string; cache: boolean; dryRun?: boolean; verbose?: boolean }) => {
     const pm = new ProcessManager();
     setupSignalHandlers(pm);
 
@@ -60,7 +62,7 @@ program
       if (options.headed) {
         config.headless = false;
       }
-      const reporter = new ConsoleReporter();
+      const reporter = new ConsoleReporter(options.verbose ?? false);
 
       // Infer provider: use explicit modelProvider unless it matches default and model suggests otherwise
       const provider =
@@ -99,14 +101,14 @@ program
           header += ` of ${totalTestCount}`;
         }
         header += ` test(s)...\n`;
-        console.log(header);
+        Bun.write(Bun.stderr, header + "\n");
 
         // Stacked annotations
-        console.log(pc.dim("  (dry-run)"));
+        Bun.write(Bun.stderr, pc.dim("  (dry-run)") + "\n");
         if (options.only) {
-          console.log(pc.dim(`  (filtered by --only "${options.only}")`));
+          Bun.write(Bun.stderr, pc.dim(`  (filtered by --only "${options.only}")`) + "\n");
         }
-        console.log("");
+        Bun.write(Bun.stderr, "\n");
 
         // Determine max test name length for padding
         const maxNameLen = Math.max(...config.tests.map(t => t.name.length));
@@ -120,11 +122,11 @@ program
           if (entry) cachedCount++;
 
           const paddedName = test.name.padEnd(maxNameLen);
-          console.log(`  ${i + 1}. ${paddedName}  (${source})`);
+          Bun.write(Bun.stderr, `  ${i + 1}. ${paddedName}  (${source})\n`);
         }
 
-        console.log("");
-        console.log(`${config.tests.length} tests, ${cachedCount} cached`);
+        Bun.write(Bun.stderr, "\n");
+        Bun.write(Bun.stderr, `${config.tests.length} tests, ${cachedCount} cached\n`);
 
         setTimeout(() => process.exit(0), 100);
         return;
@@ -166,6 +168,9 @@ program
       };
       const replayer = new StepReplayer(toolExecutor);
 
+      // Create onStepProgress callback bound to reporter
+      const onStepProgress: OnStepProgress = (step) => reporter.onStepProgress(step);
+
       // Create TestExecutor with cache-first strategy
       const executor = new TestExecutor({
         cacheManager,
@@ -176,6 +181,7 @@ program
         config,
         globalContext: config.context,
         noCache: !options.cache,
+        onStepProgress,
       });
 
       // Wire execute function for TestRunner
@@ -187,16 +193,23 @@ program
         header += ` of ${totalTestCount}`;
       }
       header += ` test(s)...\n`;
-      console.log(header);
+      Bun.write(Bun.stderr, header + "\n");
 
+      let hasAnnotation = false;
       if (options.only) {
-        console.log(pc.dim(`  (filtered by --only "${options.only}")`));
+        Bun.write(Bun.stderr, pc.dim(`  (filtered by --only "${options.only}")`) + "\n");
+        hasAnnotation = true;
       }
       if (!options.cache) {
-        console.log(pc.dim("  (cache disabled)"));
+        Bun.write(Bun.stderr, pc.dim("  (cache disabled)") + "\n");
+        hasAnnotation = true;
       }
-      if (options.only || !options.cache) {
-        console.log("");
+      if (options.verbose) {
+        Bun.write(Bun.stderr, pc.dim("  (verbose)") + "\n");
+        hasAnnotation = true;
+      }
+      if (hasAnnotation) {
+        Bun.write(Bun.stderr, "\n");
       }
 
       const runner = new TestRunner(config, reporter, executeFn);
