@@ -3,6 +3,8 @@ import { z } from "zod";
 import { StepRecorder } from "../cache/step-recorder.ts";
 import type { AgentExecutionResult } from "./types.ts";
 import { buildSystemPrompt } from "./prompt.ts";
+import { describeToolCall } from "../output/tool-name-map.ts";
+import type { OnStepProgress } from "../output/types.ts";
 
 /**
  * Schema for structured agent output.
@@ -33,6 +35,7 @@ export async function executeAgent(config: {
   recursionLimit: number;
   globalContext?: string;
   testContext?: string;
+  onStepProgress?: OnStepProgress;
 }): Promise<AgentExecutionResult> {
   const recorder = new StepRecorder();
   const wrappedTools = recorder.wrapTools(config.tools);
@@ -44,6 +47,8 @@ export async function executeAgent(config: {
     config.testContext,
   );
 
+  let stepCounter = 0;
+
   const { output } = await generateText({
     model: config.model,
     tools: wrappedTools,
@@ -51,6 +56,23 @@ export async function executeAgent(config: {
     prompt: `Execute the test case: "${config.testCase}"`,
     stopWhen: stepCountIs(config.recursionLimit),
     output: Output.object({ schema: TestResultSchema }),
+    experimental_onToolCallFinish: config.onStepProgress
+      ? (event: any) => {
+          if (event.success) {
+            stepCounter++;
+            const input = (event.toolCall.input ?? {}) as Record<
+              string,
+              unknown
+            >;
+            config.onStepProgress!({
+              stepNumber: stepCounter,
+              toolName: event.toolCall.toolName,
+              input,
+              description: describeToolCall(event.toolCall.toolName, input),
+            });
+          }
+        }
+      : undefined,
   });
 
   if (output === null) {

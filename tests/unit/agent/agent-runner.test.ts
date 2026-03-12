@@ -214,4 +214,143 @@ describe("executeAgent", () => {
     expect(callArgs).toBeDefined();
     expect(callArgs.model).toBe(fakeModel);
   });
+
+  it("calls onStepProgress for each tool call during execution", async () => {
+    // Mock generateText to simulate invoking experimental_onToolCallFinish
+    mockGenerateText.mockImplementationOnce(async (opts: any) => {
+      // Simulate two successful tool call events
+      if (opts.experimental_onToolCallFinish) {
+        opts.experimental_onToolCallFinish({
+          success: true,
+          toolCall: {
+            toolName: "browser_navigate",
+            input: { url: "/login" },
+            toolCallId: "tc1",
+          },
+          durationMs: 100,
+        });
+        opts.experimental_onToolCallFinish({
+          success: true,
+          toolCall: {
+            toolName: "browser_click",
+            input: { element: "button.submit" },
+            toolCallId: "tc2",
+          },
+          durationMs: 50,
+        });
+      }
+      return {
+        output: { passed: true, message: "OK" },
+        steps: [],
+      };
+    });
+
+    const progressCalls: any[] = [];
+    const onStepProgress = mock((step: any) => {
+      progressCalls.push(step);
+    });
+
+    await executeAgent({
+      model: fakeModel,
+      tools: fakeTools,
+      testCase: "Login test",
+      baseUrl: "http://localhost:3000",
+      recursionLimit: 500,
+      onStepProgress,
+    });
+
+    expect(onStepProgress).toHaveBeenCalledTimes(2);
+    expect(progressCalls[0].stepNumber).toBe(1);
+    expect(progressCalls[0].toolName).toBe("browser_navigate");
+    expect(progressCalls[0].input).toEqual({ url: "/login" });
+    expect(progressCalls[0].description.full).toBe("Navigate \u2192 /login");
+    expect(progressCalls[1].stepNumber).toBe(2);
+    expect(progressCalls[1].toolName).toBe("browser_click");
+    expect(progressCalls[1].input).toEqual({ element: "button.submit" });
+    expect(progressCalls[1].description.full).toBe("Click \u2192 button.submit");
+  });
+
+  it("does not call onStepProgress when not provided", async () => {
+    mockGenerateText.mockImplementationOnce(async (opts: any) => {
+      // experimental_onToolCallFinish should be undefined when no callback
+      if (opts.experimental_onToolCallFinish) {
+        opts.experimental_onToolCallFinish({
+          success: true,
+          toolCall: {
+            toolName: "browser_navigate",
+            input: { url: "/login" },
+            toolCallId: "tc1",
+          },
+          durationMs: 100,
+        });
+      }
+      return {
+        output: { passed: true, message: "OK" },
+        steps: [],
+      };
+    });
+
+    // No onStepProgress callback -- should not throw
+    const result = await executeAgent({
+      model: fakeModel,
+      tools: fakeTools,
+      testCase: "Test",
+      baseUrl: "http://localhost:3000",
+      recursionLimit: 500,
+    });
+
+    expect(result.passed).toBe(true);
+    // Verify experimental_onToolCallFinish is undefined when no callback
+    const callArgs = (mockGenerateText.mock.calls as any[][])[0]?.[0];
+    expect(callArgs.experimental_onToolCallFinish).toBeUndefined();
+  });
+
+  it("does not call onStepProgress for failed tool calls", async () => {
+    mockGenerateText.mockImplementationOnce(async (opts: any) => {
+      // Simulate a failed tool call event
+      if (opts.experimental_onToolCallFinish) {
+        opts.experimental_onToolCallFinish({
+          success: false,
+          toolCall: {
+            toolName: "browser_navigate",
+            input: { url: "/login" },
+            toolCallId: "tc1",
+          },
+          error: "Navigation failed",
+          durationMs: 200,
+        });
+        // Then a successful one
+        opts.experimental_onToolCallFinish({
+          success: true,
+          toolCall: {
+            toolName: "browser_click",
+            input: { element: "#btn" },
+            toolCallId: "tc2",
+          },
+          durationMs: 50,
+        });
+      }
+      return {
+        output: { passed: true, message: "OK" },
+        steps: [],
+      };
+    });
+
+    const onStepProgress = mock((_step: any) => {});
+
+    await executeAgent({
+      model: fakeModel,
+      tools: fakeTools,
+      testCase: "Test",
+      baseUrl: "http://localhost:3000",
+      recursionLimit: 500,
+      onStepProgress,
+    });
+
+    // Only the successful tool call should trigger callback
+    expect(onStepProgress).toHaveBeenCalledTimes(1);
+    const call = (onStepProgress.mock.calls as any[][])[0]?.[0];
+    expect(call.stepNumber).toBe(1);
+    expect(call.toolName).toBe("browser_click");
+  });
 });

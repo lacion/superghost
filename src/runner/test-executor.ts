@@ -3,6 +3,7 @@ import type { StepReplayer } from "../cache/step-replayer.ts";
 import type { AgentExecutionResult } from "../agent/types.ts";
 import type { Config } from "../config/types.ts";
 import type { TestResult } from "./types.ts";
+import type { OnStepProgress } from "../output/types.ts";
 
 /** Function signature for executing a test via the AI agent */
 type ExecuteAgentFn = (config: {
@@ -13,6 +14,7 @@ type ExecuteAgentFn = (config: {
   recursionLimit: number;
   globalContext?: string;
   testContext?: string;
+  onStepProgress?: OnStepProgress;
 }) => Promise<AgentExecutionResult>;
 
 /**
@@ -33,6 +35,7 @@ export class TestExecutor {
   > & { context?: string };
   private readonly globalContext?: string;
   private readonly noCache: boolean;
+  private readonly onStepProgress?: OnStepProgress;
 
   constructor(opts: {
     cacheManager: CacheManager;
@@ -46,6 +49,7 @@ export class TestExecutor {
     > & { context?: string };
     globalContext?: string;
     noCache?: boolean;
+    onStepProgress?: OnStepProgress;
   }) {
     this.cacheManager = opts.cacheManager;
     this.replayer = opts.replayer;
@@ -55,6 +59,7 @@ export class TestExecutor {
     this.config = opts.config;
     this.globalContext = opts.globalContext;
     this.noCache = opts.noCache ?? false;
+    this.onStepProgress = opts.onStepProgress;
   }
 
   /** Execute a single test case with cache-first strategy */
@@ -107,6 +112,7 @@ export class TestExecutor {
         recursionLimit: this.config.recursionLimit,
         globalContext: this.globalContext,
         testContext,
+        onStepProgress: this.onStepProgress,
       });
 
       if (result.passed) {
