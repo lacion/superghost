@@ -4,7 +4,8 @@
 
 - ✅ **v1.0 MVP** — Phases 1-3 (shipped 2026-03-11)
 - ✅ **v0.2 DX Polish + Reliability Hardening** — Phases 4-7 (shipped 2026-03-12)
-- 🚧 **v0.3 CI/CD + Team Readiness** — Phases 8-13 (in progress)
+- ✅ **v0.3 CI/CD + Team Readiness** — Phases 8-9 (shipped 2026-03-12)
+- 🚧 **v0.4 CI/CD + Team Readiness (Part 2)** — Phases 14-17 (in progress)
 
 ## Phases
 
@@ -27,76 +28,57 @@
 
 </details>
 
-### 🚧 v0.3 CI/CD + Team Readiness
+<details>
+<summary>v0.3 CI/CD + Team Readiness (Phases 8-9) — SHIPPED 2026-03-12</summary>
 
-**Milestone Goal:** Make SuperGhost production-ready for teams — structured CI output, enforced code quality, contributor onboarding, and flexible config.
+- [x] Phase 8: Biome Setup (1/1 plans) — completed 2026-03-12
+- [x] Phase 9: JSON Output (1/1 plans) — completed 2026-03-12
 
-- [x] **Phase 8: Biome Setup** (1/1 plans) — completed 2026-03-12
-- [x] **Phase 9: JSON Output** — Machine-readable JSON results via `--output json` for programmatic consumption (completed 2026-03-12)
-- [ ] **Phase 10: JUnit XML Output** — CI-standard JUnit XML results via `--output junit` for test reporting
-- [ ] **Phase 11: Env Var Interpolation** — `${VAR}` syntax in YAML configs for CI-safe secret injection
-- [ ] **Phase 12: GitHub Actions PR Workflow** — Lint, typecheck, and test gates on every PR
-- [ ] **Phase 13: Contributor Docs** — CONTRIBUTING.md, SECURITY.md, issue/PR templates for team onboarding
+</details>
+
+### 🚧 v0.4 CI/CD + Team Readiness (Part 2)
+
+**Milestone Goal:** Complete team-readiness features — JUnit XML for CI reporting, env var interpolation for CI-safe configs, PR workflow gates, and contributor onboarding docs.
+
+- [ ] **Phase 14: JUnit XML Output** — CI-standard JUnit XML results via `--output junit` for test reporting dashboards
+- [ ] **Phase 15: Env Var Interpolation** — `${VAR}` syntax in YAML configs for CI-safe secret injection
+- [ ] **Phase 16: GitHub Actions PR Workflow** — Lint, typecheck, and test gates on every PR
+- [ ] **Phase 17: Contributor Docs** — CONTRIBUTING.md, SECURITY.md, issue/PR templates for team onboarding
 
 ## Phase Details
 
-### Phase 8: Biome Setup
-**Goal**: All project code enforces consistent style through a single linting and formatting tool, establishing the quality baseline before any v0.3 feature code
-**Depends on**: Phase 7 (v0.2 complete)
-**Requirements**: LINT-01, LINT-02, LINT-03
-**Success Criteria** (what must be TRUE):
-  1. Running `bun run lint` checks the entire codebase for style violations and reports any issues without modifying files
-  2. Running `bun run lint:fix` auto-fixes all fixable violations (formatting, import sorting) in place
-  3. The full existing codebase (all `.ts` files) passes `bun run lint` with zero violations after a one-time formatting commit
-  4. A single `biome.json` at the project root configures all linting, formatting, and import sorting rules
-**Plans**: 1 plan
-
-Plans:
-- [x] 08-01-PLAN.md — Install Biome, configure biome.json, add lint scripts, apply baseline formatting
-
-### Phase 9: JSON Output
-**Goal**: Users can pipe SuperGhost results to `jq`, scripts, or CI tools via a machine-readable JSON format on stdout while still seeing human-readable progress on stderr
-**Depends on**: Phase 8 (code must be lint-clean before adding feature code)
-**Requirements**: OUT-01, OUT-03, OUT-04
-**Success Criteria** (what must be TRUE):
-  1. Running `superghost --output json --config tests.yaml` produces a single valid JSON object on stdout containing `version`, `success`, and full test results
-  2. Human-readable progress output (spinners, step descriptions) continues on stderr simultaneously when `--output json` is active
-  3. Commander.js help (`--help`) and version (`--version`) output is written to stderr, never stdout, so piping `--output json` through `JSON.parse()` never fails due to non-JSON preamble
-**Plans**: 1 plan
-
-Plans:
-- [ ] 09-01-PLAN.md — JSON formatter functions, --output flag, configureOutput stderr redirect, unit and integration tests
-
-### Phase 10: JUnit XML Output
+### Phase 14: JUnit XML Output
 **Goal**: CI systems (GitHub Actions, Jenkins, GitLab) can consume SuperGhost results as JUnit XML for native test reporting and PR annotations
-**Depends on**: Phase 9 (reuses --output flag infrastructure and batch-formatter architecture)
+**Depends on**: Phase 9 (reuses --output flag infrastructure and batch-formatter architecture from json-formatter.ts)
 **Requirements**: OUT-02, OUT-05
 **Success Criteria** (what must be TRUE):
-  1. Running `superghost --output junit --config tests.yaml` produces valid JUnit XML on stdout with `<testsuite>` and `<testcase>` elements including `classname` attribute and `time` in seconds
-  2. Each `<testcase>` element includes `<properties>` with SuperGhost-specific metadata: `source` (cache or ai) and `selfHealed` (true/false)
-  3. Test names containing XML-special characters (`<`, `>`, `&`, `"`, `'`) are properly escaped in the output
+  1. Running `superghost --output junit --config tests.yaml` produces valid JUnit XML on stdout with `<testsuite>` and `<testcase>` elements including `classname` attribute and `time` in seconds (not milliseconds)
+  2. Each `<testcase>` element includes a `<properties>` block with SuperGhost-specific metadata: `source` (cache or ai) and `selfHealed` (true/false)
+  3. Test names and failure messages containing XML-special characters or ANSI escape sequences are properly escaped/stripped so the XML is always parseable
+  4. Running `superghost --output junit --dry-run` and error paths produce valid JUnit XML (not plain text), consistent with the JSON output precedent
 **Plans**: TBD
 
 Plans:
-- [ ] 10-01: JUnit XML formatter with escapeXml, classname, properties metadata, integration tests
+- [ ] 14-01: JUnit XML formatter with escapeXml, ANSI stripping, classname, properties metadata, and unit tests
 
-### Phase 11: Env Var Interpolation
+### Phase 15: Env Var Interpolation
 **Goal**: Users can inject environment variables into YAML configs so CI pipelines pass secrets and environment-specific values without hardcoding
-**Depends on**: Phase 8 (lint enforcement; independent of output format phases)
+**Depends on**: Phase 9 (lint enforcement established; independent of output format phases)
 **Requirements**: CFG-01, CFG-02, CFG-03, CFG-04
 **Success Criteria** (what must be TRUE):
   1. A YAML config containing `baseUrl: ${BASE_URL}` resolves to the value of the `BASE_URL` environment variable at runtime
   2. A YAML config containing `baseUrl: ${BASE_URL:-http://localhost:3000}` uses the fallback value when `BASE_URL` is not set
   3. A YAML config containing `apiKey: ${API_KEY:?API_KEY must be set}` exits with code 2 and the descriptive error message when `API_KEY` is not set
   4. Env var values containing YAML-special characters (`:`, `#`, `{`, `[`) do not break config parsing because interpolation runs on the parsed JS object, not the raw YAML string
+  5. Resolved env var values do not leak into `.superghost-cache/` metadata — only the template form (`${VAR}`) persists in cache files
 **Plans**: TBD
 
 Plans:
-- [ ] 11-01: Post-parse interpolation engine with ${VAR}, ${VAR:-default}, ${VAR:?error} syntax and unit tests
+- [ ] 15-01: Post-parse interpolation engine with ${VAR}, ${VAR:-default}, ${VAR:?error} syntax, secret leakage prevention, and unit tests
 
-### Phase 12: GitHub Actions PR Workflow
+### Phase 16: GitHub Actions PR Workflow
 **Goal**: Every pull request and push to main is automatically checked for lint violations, type errors, and test failures before merge
-**Depends on**: Phase 8 (lint job requires Biome to exist)
+**Depends on**: Phase 14, Phase 15 (CI workflow validates all v0.4 code features)
 **Requirements**: CI-01, CI-02, CI-03
 **Success Criteria** (what must be TRUE):
   1. Opening a PR or pushing to main triggers a GitHub Actions workflow that runs lint, typecheck, and test jobs in parallel
@@ -105,11 +87,11 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 12-01: ci.yml workflow with parallel lint/typecheck/test jobs and gate aggregation
+- [ ] 16-01: ci.yml workflow with parallel lint/typecheck/test jobs, gate aggregation, and frozen-lockfile
 
-### Phase 13: Contributor Docs
+### Phase 17: Contributor Docs
 **Goal**: A new contributor can find setup instructions, understand the PR process, report bugs, and know how to disclose security issues without asking anyone
-**Depends on**: Phases 8-12 (documents the final tooling and workflow state)
+**Depends on**: Phases 14-16 (documents the final tooling and workflow state — must be last)
 **Requirements**: CONTRIB-01, CONTRIB-02, CONTRIB-03, CONTRIB-04
 **Success Criteria** (what must be TRUE):
   1. CONTRIBUTING.md documents dev setup, linting commands, testing commands, and the PR process using `bun`/`bunx` commands (never npm/npx)
@@ -119,13 +101,13 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 13-01: CONTRIBUTING.md, SECURITY.md, issue templates, and PR template
+- [ ] 17-01: CONTRIBUTING.md, SECURITY.md, issue templates, and PR template
 
 ## Progress
 
-**Execution Order:** Phases 8 -> 9 -> 10 -> 11 -> 12 -> 13
+**Execution Order:** Phases 14 -> 15 -> 16 -> 17
 
-Note: Phase 11 depends only on Phase 8 (not 9 or 10), but is sequenced after output format phases per research recommendations.
+Note: Phases 14 and 15 are technically independent but sequenced for implementation focus. Phase 16 benefits from both being complete so CI validates real functionality. Phase 17 is non-negotiably last.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -137,8 +119,8 @@ Note: Phase 11 depends only on Phase 8 (not 9 or 10), but is sequenced after out
 | 6. Dry-Run | v0.2 | 1/1 | Complete | 2026-03-12 |
 | 7. Observability | v0.2 | 2/2 | Complete | 2026-03-12 |
 | 8. Biome Setup | v0.3 | 1/1 | Complete | 2026-03-12 |
-| 9. JSON Output | 1/1 | Complete   | 2026-03-12 | - |
-| 10. JUnit XML Output | v0.3 | 0/1 | Not started | - |
-| 11. Env Var Interpolation | v0.3 | 0/1 | Not started | - |
-| 12. GitHub Actions PR Workflow | v0.3 | 0/1 | Not started | - |
-| 13. Contributor Docs | v0.3 | 0/1 | Not started | - |
+| 9. JSON Output | v0.3 | 1/1 | Complete | 2026-03-12 |
+| 14. JUnit XML Output | v0.4 | 0/1 | Not started | - |
+| 15. Env Var Interpolation | v0.4 | 0/1 | Not started | - |
+| 16. GitHub Actions PR Workflow | v0.4 | 0/1 | Not started | - |
+| 17. Contributor Docs | v0.4 | 0/1 | Not started | - |

@@ -4,8 +4,8 @@ milestone: v0.4
 milestone_name: CI/CD + Team Readiness (Part 2)
 status: not_started
 stopped_at: null
-last_updated: "2026-03-12T23:00:00.000Z"
-last_activity: 2026-03-12 — Milestone v0.4 started
+last_updated: "2026-03-13T00:00:00.000Z"
+last_activity: 2026-03-13 — Roadmap created for v0.4
 progress:
   total_phases: 4
   completed_phases: 0
@@ -21,14 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
-**Current focus:** Milestone v0.4 — CI/CD + Team Readiness (Part 2)
+**Current focus:** Phase 14 — JUnit XML Output
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-12 — Milestone v0.4 started
+Phase: 14 of 17 (JUnit XML Output)
+Plan: 0 of 1 in current phase
+Status: Ready to plan
+Last activity: 2026-03-13 — Roadmap created for v0.4
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -61,9 +63,10 @@ Carried forward:
 - OpenRouter model namespace format (`anthropic/claude-3-5-sonnet`) needs integration test
 - Gemini tool call response shape differences need dedicated integration test
 - `bun build --compile` dynamic import limitation — MCP server packages must NOT be bundled into binary
-- Secret leakage in cache metadata when env vars resolve API keys (design during env var interpolation phase)
+- Secret leakage in cache metadata when env vars resolve API keys (design during Phase 15)
 
 ## Session Continuity
 
-Last session: 2026-03-12
-Stopped at: Milestone v0.4 initialization
+Last session: 2026-03-13
+Stopped at: Roadmap created for v0.4 milestone
+Resume file: None
