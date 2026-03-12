@@ -10,7 +10,7 @@ Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap ph
 ### CLI Flags
 
 - [x] **FLAG-01**: User can run `--dry-run` to list test names and validate config without executing AI or launching browser
-- [ ] **FLAG-02**: User can run `--verbose` to see per-step AI tool call output during test execution
+- [x] **FLAG-02**: User can run `--verbose` to see per-step AI tool call output during test execution
 - [x] **FLAG-03**: User can run `--no-cache` to bypass cache reads while still writing cache on successful AI runs
 - [x] **FLAG-04**: User can run `--only <pattern>` to filter tests by glob pattern, with exit 2 if zero tests match
 
@@ -27,7 +27,7 @@ Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap ph
 ### Observability
 
 - [x] **OBS-01**: CLI shows real-time step progress during AI execution (tool call names mapped to human descriptions)
-- [ ] **OBS-02**: All progress/spinner output routes to stderr (not stdout), with TTY detection gating ANSI output
+- [x] **OBS-02**: All progress/spinner output routes to stderr (not stdout), with TTY detection gating ANSI output
 
 ## Future Requirements
 
@@ -80,9 +80,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLAG-04 | Phase 5 | Complete |
 | FLAG-03 | Phase 5 | Complete |
 | FLAG-01 | Phase 6 | Complete |
-| FLAG-02 | Phase 7 | Pending |
+| FLAG-02 | Phase 7 | Complete |
 | OBS-01 | Phase 7 | Complete |
-| OBS-02 | Phase 7 | Pending |
+| OBS-02 | Phase 7 | Complete |
 
 **Coverage:**
 - v0.2 requirements: 10 total
