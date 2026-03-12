@@ -31,7 +31,7 @@
 
 **Milestone Goal:** Make SuperGhost production-ready for teams — structured CI output, enforced code quality, contributor onboarding, and flexible config.
 
-- [ ] **Phase 8: Biome Setup** — Linting, formatting, and import sorting baseline for the entire codebase
+- [x] **Phase 8: Biome Setup** (1/1 plans) — completed 2026-03-12
 - [ ] **Phase 9: JSON Output** — Machine-readable JSON results via `--output json` for programmatic consumption
 - [ ] **Phase 10: JUnit XML Output** — CI-standard JUnit XML results via `--output junit` for test reporting
 - [ ] **Phase 11: Env Var Interpolation** — `${VAR}` syntax in YAML configs for CI-safe secret injection
@@ -52,7 +52,7 @@
 **Plans**: 1 plan
 
 Plans:
-- [ ] 08-01-PLAN.md — Install Biome, configure biome.json, add lint scripts, apply baseline formatting
+- [x] 08-01-PLAN.md — Install Biome, configure biome.json, add lint scripts, apply baseline formatting
 
 ### Phase 9: JSON Output
 **Goal**: Users can pipe SuperGhost results to `jq`, scripts, or CI tools via a machine-readable JSON format on stdout while still seeing human-readable progress on stderr
@@ -136,7 +136,7 @@ Note: Phase 11 depends only on Phase 8 (not 9 or 10), but is sequenced after out
 | 5. Infrastructure + Flags | v0.2 | 2/2 | Complete | 2026-03-12 |
 | 6. Dry-Run | v0.2 | 1/1 | Complete | 2026-03-12 |
 | 7. Observability | v0.2 | 2/2 | Complete | 2026-03-12 |
-| 8. Biome Setup | v0.3 | 0/1 | Not started | - |
+| 8. Biome Setup | v0.3 | 1/1 | Complete | 2026-03-12 |
 | 9. JSON Output | v0.3 | 0/1 | Not started | - |
 | 10. JUnit XML Output | v0.3 | 0/1 | Not started | - |
 | 11. Env Var Interpolation | v0.3 | 0/1 | Not started | - |

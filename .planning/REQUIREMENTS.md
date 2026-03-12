@@ -33,9 +33,9 @@ Requirements for v0.3 CI/CD + Team Readiness. Each maps to roadmap phases.
 
 ### Linting & Formatting
 
-- [ ] **LINT-01**: Project uses Biome for linting, formatting, and import sorting with a single `biome.json` config
-- [ ] **LINT-02**: `bun run lint` checks code style and `bun run lint:fix` auto-fixes violations
-- [ ] **LINT-03**: All existing code passes Biome checks after initial formatting baseline commit
+- [x] **LINT-01**: Project uses Biome for linting, formatting, and import sorting with a single `biome.json` config
+- [x] **LINT-02**: `bun run lint` checks code style and `bun run lint:fix` auto-fixes violations
+- [x] **LINT-03**: All existing code passes Biome checks after initial formatting baseline commit
 
 ### Output Formats
 
@@ -114,9 +114,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CACHE-02 | Phase 4 (v0.2) | Complete |
 | OBS-01 | Phase 7 (v0.2) | Complete |
 | OBS-02 | Phase 7 (v0.2) | Complete |
-| LINT-01 | Phase 8 (v0.3) | Pending |
-| LINT-02 | Phase 8 (v0.3) | Pending |
-| LINT-03 | Phase 8 (v0.3) | Pending |
+| LINT-01 | Phase 8 (v0.3) | Complete |
+| LINT-02 | Phase 8 (v0.3) | Complete |
+| LINT-03 | Phase 8 (v0.3) | Complete |
 | OUT-01 | Phase 9 (v0.3) | Pending |
 | OUT-03 | Phase 9 (v0.3) | Pending |
 | OUT-04 | Phase 9 (v0.3) | Pending |
