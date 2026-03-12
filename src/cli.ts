@@ -36,6 +36,7 @@ program
   .option("--headed", "Run browser in headed mode (visible browser window)")
   .option("--only <pattern>", "Run only tests matching glob pattern")
   .option("--no-cache", "Bypass cache reads (still writes on success)")
+  .option("--dry-run", "List tests and validate config without executing")
   .exitOverride((err) => {
     // Commander writes its own error message to stderr.
     // Re-exit with code 2 for config-class errors (missing required option, unknown option).
@@ -43,7 +44,7 @@ program
       process.exit(2);
     }
   })
-  .action(async (options: { config: string; headed?: boolean; only?: string; cache: boolean }) => {
+  .action(async (options: { config: string; headed?: boolean; only?: string; cache: boolean; dryRun?: boolean }) => {
     const pm = new ProcessManager();
     setupSignalHandlers(pm);
 
@@ -86,6 +87,47 @@ program
           setTimeout(() => process.exit(2), 100);
           return;
         }
+      }
+
+      // Dry-run: list tests with cache/AI source labels, then exit
+      if (options.dryRun) {
+        const cacheManager = new CacheManager(config.cacheDir);
+
+        // Print header (same as normal run)
+        let header = `\n${pc.bold("superghost")} v${pkg.version} / Running ${config.tests.length}`;
+        if (options.only) {
+          header += ` of ${totalTestCount}`;
+        }
+        header += ` test(s)...\n`;
+        console.log(header);
+
+        // Stacked annotations
+        console.log(pc.dim("  (dry-run)"));
+        if (options.only) {
+          console.log(pc.dim(`  (filtered by --only "${options.only}")`));
+        }
+        console.log("");
+
+        // Determine max test name length for padding
+        const maxNameLen = Math.max(...config.tests.map(t => t.name.length));
+        let cachedCount = 0;
+
+        for (let i = 0; i < config.tests.length; i++) {
+          const test = config.tests[i];
+          const baseUrl = test.baseUrl ?? config.baseUrl ?? "";
+          const entry = await cacheManager.load(test.case, baseUrl);
+          const source = entry ? "cache" : "ai";
+          if (entry) cachedCount++;
+
+          const paddedName = test.name.padEnd(maxNameLen);
+          console.log(`  ${i + 1}. ${paddedName}  (${source})`);
+        }
+
+        console.log("");
+        console.log(`${config.tests.length} tests, ${cachedCount} cached`);
+
+        setTimeout(() => process.exit(0), 100);
+        return;
       }
 
       // Preflight: check baseUrl reachability (only if global baseUrl configured)
