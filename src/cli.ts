@@ -17,6 +17,12 @@ import { checkBaseUrlReachable } from "./infra/preflight.ts";
 import { ProcessManager } from "./infra/process-manager.ts";
 import { setupSignalHandlers } from "./infra/signals.ts";
 import { animateBanner } from "./output/banner.ts";
+import {
+  formatJsonDryRun,
+  formatJsonError,
+  formatJsonOutput,
+  type JsonOutputMetadata,
+} from "./output/json-formatter.ts";
 import { ConsoleReporter, writeStderr } from "./output/reporter.ts";
 import { type OnStepProgress } from "./output/types.ts";
 import { TestExecutor } from "./runner/test-executor.ts";
@@ -42,6 +48,11 @@ function printRunHeader(testCount: number, totalTestCount: number | undefined, a
 
 const program = new Command();
 
+program.configureOutput({
+  writeOut: (str) => writeStderr(str.trimEnd()),
+  writeErr: (str) => writeStderr(str.trimEnd()),
+});
+
 program
   .name("superghost")
   .description("AI-powered end-to-end browser and API testing")
@@ -52,6 +63,7 @@ program
   .option("--no-cache", "Bypass cache reads (still writes on success)")
   .option("--dry-run", "List tests and validate config without executing")
   .option("--verbose", "Show per-step tool call output during execution")
+  .option("--output <format>", "Output format (json)")
   .exitOverride((err) => {
     // Commander writes its own error message to stderr.
     // Re-exit with code 2 for config-class errors (missing required option, unknown option).
@@ -67,9 +79,17 @@ program
       cache: boolean;
       dryRun?: boolean;
       verbose?: boolean;
+      output?: string;
     }) => {
       const pm = new ProcessManager();
       setupSignalHandlers(pm);
+
+      // Validate --output format early
+      if (options.output && options.output !== "json") {
+        writeStderr(`${pc.red("Error:")} Unknown output format '${options.output}'. Supported: json`);
+        setTimeout(() => process.exit(2), 100);
+        return;
+      }
 
       // Auto-install MCP dependencies for standalone binary on first run
       if (isStandaloneBinary()) {
@@ -119,13 +139,15 @@ program
           // Determine max test name length for padding
           const maxNameLen = Math.max(...config.tests.map((t) => t.name.length));
           let cachedCount = 0;
+          const dryRunTests: Array<{ name: string; case: string; source: "cache" | "ai" }> = [];
 
           for (let i = 0; i < config.tests.length; i++) {
             const test = config.tests[i];
             const baseUrl = test.baseUrl ?? config.baseUrl ?? "";
             const entry = await cacheManager.load(test.case, baseUrl);
-            const source = entry ? "cache" : "ai";
+            const source: "cache" | "ai" = entry ? "cache" : "ai";
             if (entry) cachedCount++;
+            dryRunTests.push({ name: test.name, case: test.case, source });
 
             const paddedName = test.name.padEnd(maxNameLen);
             writeStderr(`  ${i + 1}. ${paddedName}  (${source})`);
@@ -133,6 +155,27 @@ program
 
           writeStderr("");
           writeStderr(`${config.tests.length} tests, ${cachedCount} cached`);
+
+          // Write JSON to stdout when --output json is active
+          if (options.output === "json") {
+            const metadata: JsonOutputMetadata = {
+              model: config.model,
+              provider,
+              configFile: options.config,
+              baseUrl: config.baseUrl,
+              timestamp: new Date().toISOString(),
+              ...(options.only
+                ? { filter: { pattern: options.only, matched: config.tests.length, total: totalTestCount } }
+                : {}),
+            };
+            const testList = dryRunTests.map((t) => ({
+              name: t.name,
+              case: t.case,
+              source: t.source,
+            }));
+            const json = formatJsonDryRun(testList, metadata, pkg.version);
+            process.stdout.write(`${json}\n`);
+          }
 
           setTimeout(() => process.exit(0), 100);
           return;
@@ -204,6 +247,23 @@ program
         await mcpManager.close();
         await pm.killAll();
         const code = result.failed > 0 ? 1 : 0;
+
+        // Write JSON to stdout when --output json is active
+        if (options.output === "json") {
+          const metadata: JsonOutputMetadata = {
+            model: config.model,
+            provider,
+            configFile: options.config,
+            baseUrl: config.baseUrl,
+            timestamp: new Date().toISOString(),
+            ...(options.only
+              ? { filter: { pattern: options.only, matched: config.tests.length, total: totalTestCount } }
+              : {}),
+          };
+          const json = formatJsonOutput(result, metadata, pkg.version, code);
+          process.stdout.write(`${json}\n`);
+        }
+
         setTimeout(() => process.exit(code), 100);
       } catch (error) {
         if (mcpManager) {
@@ -213,16 +273,28 @@ program
 
         if (error instanceof ConfigLoadError) {
           writeStderr(`${pc.red("Error:")} ${error.message}`);
+          if (options.output === "json") {
+            const json = formatJsonError(error.message, pkg.version, { configFile: options.config });
+            process.stdout.write(`${json}\n`);
+          }
           setTimeout(() => process.exit(2), 100);
           return;
         }
         if (error instanceof Error && error.message.startsWith("Missing API key")) {
           writeStderr(`${pc.red("Error:")} ${error.message}`);
+          if (options.output === "json") {
+            const json = formatJsonError(error.message, pkg.version, { configFile: options.config });
+            process.stdout.write(`${json}\n`);
+          }
           setTimeout(() => process.exit(2), 100);
           return;
         }
         const msg = error instanceof Error ? error.message : String(error);
         writeStderr(`${pc.red("Unexpected error:")} ${msg}`);
+        if (options.output === "json") {
+          const json = formatJsonError(msg, pkg.version, { configFile: options.config });
+          process.stdout.write(`${json}\n`);
+        }
         setTimeout(() => process.exit(2), 100);
       }
     },

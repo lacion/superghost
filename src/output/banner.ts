@@ -36,31 +36,31 @@ const FRAME_MS = 60;
 const HUE_STEP = 24;
 
 export async function animateBanner(): Promise<void> {
-  const isTTY = process.stdout.isTTY === true;
+  const isTTY = process.stderr.isTTY === true;
 
   if (!isTTY) {
     const lines = BANNER_LINES;
-    process.stdout.write(`${lines.join("\n")}\n\n`);
+    process.stderr.write(`${lines.join("\n")}\n\n`);
     return;
   }
 
-  process.stdout.write("\x1b[?25l"); // hide cursor
+  process.stderr.write("\x1b[?25l"); // hide cursor
 
   try {
     for (let frame = 0; frame < FRAMES; frame++) {
       const lines = renderBanner(frame * HUE_STEP);
       if (frame > 0) {
         // Move cursor up N lines to overwrite previous frame
-        process.stdout.write(`\x1b[${lines.length}A`);
+        process.stderr.write(`\x1b[${lines.length}A`);
       }
-      process.stdout.write(`${lines.join("\n")}\n`);
+      process.stderr.write(`${lines.join("\n")}\n`);
 
       if (frame < FRAMES - 1) {
         await new Promise<void>((resolve) => setTimeout(resolve, FRAME_MS));
       }
     }
-    process.stdout.write("\n");
+    process.stderr.write("\n");
   } finally {
-    process.stdout.write("\x1b[?25h"); // restore cursor
+    process.stderr.write("\x1b[?25h"); // restore cursor
   }
 }

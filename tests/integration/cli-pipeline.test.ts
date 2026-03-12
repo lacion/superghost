@@ -56,16 +56,18 @@ describe("CLI Pipeline Integration", () => {
   });
 
   test("--help shows usage and --config option", async () => {
-    const { exitCode, stdout } = await runCli(["--help"]);
+    const { exitCode, stdout, stderr } = await runCli(["--help"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("--config");
-    expect(stdout).toContain("superghost");
+    expect(stdout).toBe("");
+    expect(stderr).toContain("--config");
+    expect(stderr).toContain("superghost");
   });
 
   test("--version shows 0.2.0", async () => {
-    const { exitCode, stdout } = await runCli(["--version"]);
+    const { exitCode, stdout, stderr } = await runCli(["--version"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("0.2.0");
+    expect(stdout).toBe("");
+    expect(stderr).toContain("0.2.0");
   });
 
   test("--no-cache flag is accepted (exits 2 for missing API key, not unknown option)", async () => {
@@ -90,10 +92,10 @@ describe("CLI Pipeline Integration", () => {
   });
 
   test("--help shows --only and --no-cache options", async () => {
-    const { exitCode, stdout } = await runCli(["--help"]);
+    const { exitCode, stderr } = await runCli(["--help"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("--only");
-    expect(stdout).toContain("--no-cache");
+    expect(stderr).toContain("--only");
+    expect(stderr).toContain("--no-cache");
   });
 
   test("unreachable baseUrl exits 2 with error message", async () => {
@@ -152,9 +154,9 @@ describe("CLI Pipeline Integration", () => {
 
   describe("dry-run", () => {
     test("--help shows --dry-run option", async () => {
-      const { exitCode, stdout } = await runCli(["--help"]);
+      const { exitCode, stderr } = await runCli(["--help"]);
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("--dry-run");
+      expect(stderr).toContain("--dry-run");
     });
 
     test("--dry-run lists tests with source labels", async () => {
@@ -290,11 +292,92 @@ describe("CLI Pipeline Integration", () => {
     });
   });
 
+  describe("output json", () => {
+    test("--output json --dry-run produces valid JSON on stdout", async () => {
+      const { exitCode, stdout, stderr } = await runCli(
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--output", "json", "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.version).toBe("0.2.0");
+      expect(parsed.success).toBe(true);
+      expect(parsed.dryRun).toBe(true);
+      expect(parsed.tests).toHaveLength(4);
+      for (const t of parsed.tests) {
+        expect(t.testName).toBeDefined();
+        expect(t.testCase).toBeDefined();
+        expect(t.source).toBeDefined();
+      }
+      // OUT-03: stderr still has human-readable progress
+      expect(stderr).not.toBe("");
+    });
+
+    test("--output json --dry-run --only filters correctly", async () => {
+      const { exitCode, stdout } = await runCli(
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--output", "json", "--dry-run", "--only", "Login*"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.metadata.filter).toBeDefined();
+      expect(parsed.metadata.filter.pattern).toBe("Login*");
+      expect(parsed.metadata.filter.matched).toBe(2);
+      expect(parsed.metadata.filter.total).toBe(4);
+      expect(parsed.tests).toHaveLength(2);
+    });
+
+    test("--help outputs to stderr not stdout", async () => {
+      const { exitCode, stdout, stderr } = await runCli(["--help"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("--config");
+    });
+
+    test("--version outputs to stderr not stdout", async () => {
+      const { exitCode, stdout, stderr } = await runCli(["--version"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("0.2.0");
+    });
+
+    test("unknown --output format exits 2", async () => {
+      const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/valid-config.yaml", "--output", "csv"], {
+        OPENAI_API_KEY: "fake-key",
+      });
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain("Unknown output format");
+      expect(stderr).toContain("csv");
+    });
+
+    test("--output json with missing API key emits error JSON", async () => {
+      const { exitCode, stdout } = await runCli(["--config", "tests/fixtures/valid-config.yaml", "--output", "json"], {
+        OPENAI_API_KEY: "",
+      });
+      expect(exitCode).toBe(2);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.success).toBe(false);
+      expect(parsed.exitCode).toBe(2);
+      expect(parsed.error).toContain("Missing API key");
+    });
+
+    test("--output json --dry-run stderr still shows progress", async () => {
+      const { exitCode, stderr } = await runCli(
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--output", "json", "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      // Human-readable output continues on stderr
+      expect(stderr).toContain("Login Flow");
+      expect(stderr).toContain("Dashboard Load");
+    });
+  });
+
   describe("verbose", () => {
     test("--help shows --verbose option", async () => {
-      const { exitCode, stdout } = await runCli(["--help"]);
+      const { exitCode, stderr } = await runCli(["--help"]);
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("--verbose");
+      expect(stderr).toContain("--verbose");
     });
 
     test("--verbose flag is accepted (exits 2 for missing API key, not unknown option)", async () => {
