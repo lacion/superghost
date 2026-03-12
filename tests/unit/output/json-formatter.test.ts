@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import type { RunResult } from "../../../src/runner/types.ts";
 import {
-  type JsonOutput,
-  type JsonOutputMetadata,
   formatJsonDryRun,
   formatJsonError,
   formatJsonOutput,
+  type JsonOutput,
+  type JsonOutputMetadata,
 } from "../../../src/output/json-formatter.ts";
+import { type RunResult } from "../../../src/runner/types.ts";
 
 function makeMetadata(overrides?: Partial<JsonOutputMetadata>): JsonOutputMetadata {
   return {
