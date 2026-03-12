@@ -63,11 +63,11 @@ describe("CLI Pipeline Integration", () => {
     expect(stderr).toContain("superghost");
   });
 
-  test("--version shows 0.3.0", async () => {
+  test("--version shows 0.3.1", async () => {
     const { exitCode, stdout, stderr } = await runCli(["--version"]);
     expect(exitCode).toBe(0);
     expect(stdout).toBe("");
-    expect(stderr).toContain("0.3.0");
+    expect(stderr).toContain("0.3.1");
   });
 
   test("--no-cache flag is accepted (exits 2 for missing API key, not unknown option)", async () => {
@@ -300,7 +300,7 @@ describe("CLI Pipeline Integration", () => {
       );
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout);
-      expect(parsed.version).toBe("0.3.0");
+      expect(parsed.version).toBe("0.3.1");
       expect(parsed.success).toBe(true);
       expect(parsed.dryRun).toBe(true);
       expect(parsed.tests).toHaveLength(4);
@@ -338,7 +338,7 @@ describe("CLI Pipeline Integration", () => {
       const { exitCode, stdout, stderr } = await runCli(["--version"]);
       expect(exitCode).toBe(0);
       expect(stdout).toBe("");
-      expect(stderr).toContain("0.3.0");
+      expect(stderr).toContain("0.3.1");
     });
 
     test("unknown --output format exits 2", async () => {

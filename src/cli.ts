@@ -16,7 +16,6 @@ import { ensureMcpDependencies } from "./dist/setup.ts";
 import { checkBaseUrlReachable } from "./infra/preflight.ts";
 import { ProcessManager } from "./infra/process-manager.ts";
 import { setupSignalHandlers } from "./infra/signals.ts";
-import { animateBanner } from "./output/banner.ts";
 import {
   formatJsonDryRun,
   formatJsonError,
@@ -301,9 +300,5 @@ program
   );
 
 (async () => {
-  const isHelpRequest = process.argv.includes("--help") || process.argv.includes("-h");
-  if (isHelpRequest) {
-    await animateBanner();
-  }
   await program.parseAsync();
 })();

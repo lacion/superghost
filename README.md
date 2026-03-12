@@ -38,7 +38,7 @@ Create a `tests.yaml` file:
 
 ```yaml
 baseUrl: https://example.com
-model: claude-sonnet-4-20250514
+model: claude-sonnet-4-6
 
 tests:
   - name: Homepage loads
@@ -61,9 +61,57 @@ Usage: superghost [options]
 
 Options:
   -c, --config <path>  Path to YAML config file (required)
+  --headed             Run browser in headed mode (visible browser window)
+  --only <pattern>     Run only tests matching glob pattern
+  --no-cache           Bypass cache reads (still writes on success)
+  --dry-run            List tests and validate config without executing
+  --verbose            Show per-step tool call output during execution
+  --output <format>    Output format (json)
   -V, --version        Output the version number
   -h, --help           Display help
 ```
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | All tests passed |
+| `1`  | One or more tests failed |
+| `2`  | Configuration or runtime error (invalid config, missing API key, unreachable baseUrl) |
+
+### Test Filtering
+
+Use `--only` to run a subset of tests by glob pattern:
+
+```bash
+superghost --config tests.yaml --only "Homepage*"
+superghost --config tests.yaml --only "*API*"
+```
+
+The pattern is matched case-insensitively against test names.
+
+### Dry-Run Mode
+
+`--dry-run` validates your config and lists all tests without executing them. Each test is labeled with its source — `cache` if a cached result exists, or `ai` if it would require an AI call:
+
+```bash
+superghost --config tests.yaml --dry-run
+```
+
+### JSON Output
+
+`--output json` writes machine-readable JSON to stdout. Human-readable progress still goes to stderr, so you can pipe the JSON output:
+
+```bash
+superghost --config tests.yaml --output json > results.json
+superghost --config tests.yaml --output json 2>/dev/null | jq .
+```
+
+Combines with other flags like `--dry-run` and `--only`.
+
+### Verbose Mode
+
+`--verbose` prints per-step tool call output during execution, useful for debugging test failures.
 
 ## Provider Setup
 
@@ -76,7 +124,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ```yaml
-model: claude-sonnet-4-20250514
+model: claude-sonnet-4-6
 ```
 
 ### OpenAI
@@ -108,7 +156,7 @@ export OPENROUTER_API_KEY=sk-or-...
 ```
 
 ```yaml
-model: anthropic/claude-sonnet-4-20250514
+model: anthropic/claude-sonnet-4-6
 modelProvider: openrouter
 ```
 
@@ -118,17 +166,23 @@ All fields in `tests.yaml`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `baseUrl` | `string` | (required) | Base URL for all tests |
-| `model` | `string` | (required) | AI model identifier |
+| `baseUrl` | `string` | — | Base URL for all tests |
+| `model` | `string` | `"claude-sonnet-4-6"` | AI model identifier |
 | `modelProvider` | `string` | `"anthropic"` | Provider: `anthropic`, `openai`, `gemini`, `openrouter` |
 | `browser` | `string` | `"chromium"` | Browser engine: `chromium`, `firefox`, `webkit` |
-| `headless` | `boolean` | `false` | Run browser in headless mode |
+| `headless` | `boolean` | `true` | Run browser in headless mode |
+| `timeout` | `number` | `60000` | Global timeout in ms |
+| `maxAttempts` | `number` | `3` | Max retry attempts per test (1–10) |
+| `recursionLimit` | `number` | `500` | Max AI reasoning steps |
 | `cacheDir` | `string` | `".superghost-cache"` | Directory for cached test steps |
-| `context` | `string` | `undefined` | Global context passed to every test |
+| `context` | `string` | — | Global context passed to every test |
 | `tests` | `array` | (required) | Array of test definitions |
-| `tests[].name` | `string` | `undefined` | Display name for the test |
+| `tests[].name` | `string` | — | Display name for the test |
 | `tests[].case` | `string` | (required) | Plain English test instruction |
-| `tests[].context` | `string` | `undefined` | Per-test context for the AI agent |
+| `tests[].baseUrl` | `string` | — | Per-test URL override |
+| `tests[].timeout` | `number` | — | Per-test timeout override |
+| `tests[].type` | `string` | `"browser"` | Test type: `browser` or `api` |
+| `tests[].context` | `string` | — | Per-test context for the AI agent |
 
 ## How It Works
 
