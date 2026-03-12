@@ -42,6 +42,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
 
@@ -64,10 +66,62 @@ jobs:
           done
           ls -lh dist/superghost-*
 
+      - name: Generate release notes
+        id: release-notes
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          # Find previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | sed -n '2p')
+
+          # Get git log between tags (or all history for first release)
+          if [ -n "$PREV_TAG" ]; then
+            GIT_LOG=$(git log "$PREV_TAG".."$TAG_NAME" --pretty=format:'%h %s' --no-merges)
+          else
+            GIT_LOG=$(git log "$TAG_NAME" --pretty=format:'%h %s' --no-merges)
+          fi
+
+          # Build the API request body safely with jq
+          REQUEST_BODY=$(jq -n \
+            --arg log "$GIT_LOG" \
+            --arg tag "$TAG_NAME" \
+            --arg prev "${PREV_TAG:-"(first release)"}" \
+            '{
+              model: "claude-sonnet-4-6",
+              max_tokens: 1024,
+              messages: [{
+                role: "user",
+                content: ("Generate release notes for " + $tag + " (previous: " + $prev + ").\n\nGit log:\n" + $log + "\n\nInstructions:\n- Write a 1-2 sentence summary of the release\n- Categorize changes under headings: Breaking Changes, Features, Bug Fixes, Improvements, Docs, Testing, Chores\n- Omit empty categories\n- Describe user-facing impact, not just commit messages\n- Skip internal/planning commits\n- Keep it concise (10-20 bullets total)\n- Output markdown only, no preamble")
+              }]
+            }')
+
+          # Call Anthropic API, fall back to raw git log on failure
+          RESPONSE=$(curl -s --max-time 30 \
+            https://api.anthropic.com/v1/messages \
+            -H "content-type: application/json" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "$REQUEST_BODY") || true
+
+          NOTES=$(echo "$RESPONSE" | jq -r '.content[0].text // empty' 2>/dev/null)
+
+          if [ -z "$NOTES" ]; then
+            echo "::warning::AI release notes failed, falling back to git log"
+            NOTES="## What's Changed"$'\n\n'"$GIT_LOG"
+          fi
+
+          # Write to GITHUB_OUTPUT using delimiter syntax for multiline
+          {
+            echo "notes<<RELEASE_NOTES_EOF"
+            echo "$NOTES"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body: ${{ steps.release-notes.outputs.notes }}
           files: dist/superghost-*
 
   publish-npm:
