@@ -22,6 +22,7 @@ import {
   formatJsonOutput,
   type JsonOutputMetadata,
 } from "./output/json-formatter.ts";
+import { formatJunitDryRun, formatJunitError, formatJunitOutput } from "./output/junit-formatter.ts";
 import { ConsoleReporter, writeStderr } from "./output/reporter.ts";
 import { type OnStepProgress } from "./output/types.ts";
 import { TestExecutor } from "./runner/test-executor.ts";
@@ -62,7 +63,7 @@ program
   .option("--no-cache", "Bypass cache reads (still writes on success)")
   .option("--dry-run", "List tests and validate config without executing")
   .option("--verbose", "Show per-step tool call output during execution")
-  .option("--output <format>", "Output format (json)")
+  .option("--output <format>", "Output format (json, junit)")
   .exitOverride((err) => {
     // Commander writes its own error message to stderr.
     // Re-exit with code 2 for config-class errors (missing required option, unknown option).
@@ -84,8 +85,8 @@ program
       setupSignalHandlers(pm);
 
       // Validate --output format early
-      if (options.output && options.output !== "json") {
-        writeStderr(`${pc.red("Error:")} Unknown output format '${options.output}'. Supported: json`);
+      if (options.output && options.output !== "json" && options.output !== "junit") {
+        writeStderr(`${pc.red("Error:")} Unknown output format '${options.output}'. Supported: json, junit`);
         setTimeout(() => process.exit(2), 100);
         return;
       }
@@ -155,8 +156,8 @@ program
           writeStderr("");
           writeStderr(`${config.tests.length} tests, ${cachedCount} cached`);
 
-          // Write JSON to stdout when --output json is active
-          if (options.output === "json") {
+          // Write structured output to stdout when --output is active
+          if (options.output === "json" || options.output === "junit") {
             const metadata: JsonOutputMetadata = {
               model: config.model,
               provider,
@@ -172,8 +173,13 @@ program
               case: t.case,
               source: t.source,
             }));
-            const json = formatJsonDryRun(testList, metadata, pkg.version);
-            process.stdout.write(`${json}\n`);
+            if (options.output === "json") {
+              const json = formatJsonDryRun(testList, metadata, pkg.version);
+              process.stdout.write(`${json}\n`);
+            } else {
+              const xml = formatJunitDryRun(testList, metadata, pkg.version);
+              process.stdout.write(`${xml}\n`);
+            }
           }
 
           setTimeout(() => process.exit(0), 100);
@@ -247,8 +253,8 @@ program
         await pm.killAll();
         const code = result.failed > 0 ? 1 : 0;
 
-        // Write JSON to stdout when --output json is active
-        if (options.output === "json") {
+        // Write structured output to stdout when --output is active
+        if (options.output === "json" || options.output === "junit") {
           const metadata: JsonOutputMetadata = {
             model: config.model,
             provider,
@@ -259,8 +265,13 @@ program
               ? { filter: { pattern: options.only, matched: config.tests.length, total: totalTestCount } }
               : {}),
           };
-          const json = formatJsonOutput(result, metadata, pkg.version, code);
-          process.stdout.write(`${json}\n`);
+          if (options.output === "json") {
+            const json = formatJsonOutput(result, metadata, pkg.version, code);
+            process.stdout.write(`${json}\n`);
+          } else {
+            const xml = formatJunitOutput(result, metadata, pkg.version, code);
+            process.stdout.write(`${xml}\n`);
+          }
         }
 
         setTimeout(() => process.exit(code), 100);
@@ -275,6 +286,9 @@ program
           if (options.output === "json") {
             const json = formatJsonError(error.message, pkg.version, { configFile: options.config });
             process.stdout.write(`${json}\n`);
+          } else if (options.output === "junit") {
+            const xml = formatJunitError(error.message, pkg.version, { configFile: options.config });
+            process.stdout.write(`${xml}\n`);
           }
           setTimeout(() => process.exit(2), 100);
           return;
@@ -284,6 +298,9 @@ program
           if (options.output === "json") {
             const json = formatJsonError(error.message, pkg.version, { configFile: options.config });
             process.stdout.write(`${json}\n`);
+          } else if (options.output === "junit") {
+            const xml = formatJunitError(error.message, pkg.version, { configFile: options.config });
+            process.stdout.write(`${xml}\n`);
           }
           setTimeout(() => process.exit(2), 100);
           return;
@@ -293,6 +310,9 @@ program
         if (options.output === "json") {
           const json = formatJsonError(msg, pkg.version, { configFile: options.config });
           process.stdout.write(`${json}\n`);
+        } else if (options.output === "junit") {
+          const xml = formatJunitError(msg, pkg.version, { configFile: options.config });
+          process.stdout.write(`${xml}\n`);
         }
         setTimeout(() => process.exit(2), 100);
       }
