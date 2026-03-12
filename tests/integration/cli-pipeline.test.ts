@@ -177,4 +177,153 @@ describe("CLI Pipeline Integration", () => {
   // ConfigLoadError or "Missing API key". The catch-all is verified by
   // code inspection: the catch block exits(2) for all remaining paths
   // with no remaining `throw error`.
+
+  describe("dry-run", () => {
+    test("--help shows --dry-run option", async () => {
+      const { exitCode, stdout } = await runCli(["--help"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("--dry-run");
+    });
+
+    test("--dry-run lists tests with source labels", async () => {
+      const { exitCode, stdout } = await runCli(
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("Login Flow");
+      expect(stdout).toContain("Login Error");
+      expect(stdout).toContain("Dashboard Load");
+      expect(stdout).toContain("Checkout Process");
+      expect(stdout).toContain("(ai)");
+      expect(stdout).toContain("4 tests, 0 cached");
+    });
+
+    test("--dry-run detects cached tests", async () => {
+      const { mkdtemp, writeFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      const { CacheManager } = await import("../../src/cache/cache-manager.ts");
+
+      // Create a temp cache dir and populate it with a cache entry for "Login Flow"
+      const tmpCacheDir = await mkdtemp(join(tmpdir(), "sg-cache-"));
+      const testCase = "check that login works with valid credentials";
+      const baseUrl = "https://example.com";
+      const hash = CacheManager.hashKey(testCase, baseUrl);
+      const cacheEntry = {
+        version: 2,
+        testCase,
+        baseUrl,
+        steps: [],
+        model: "gpt-4o",
+        provider: "openai",
+        stepCount: 3,
+        aiMessage: "test passed",
+        durationMs: 1000,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await writeFile(
+        join(tmpCacheDir, `${hash}.json`),
+        JSON.stringify(cacheEntry, null, 2),
+      );
+
+      // Create a temp config pointing at the cache dir
+      const tmpConfig = join(tmpdir(), "sg-dry-run-cache-test.yaml");
+      await Bun.write(
+        tmpConfig,
+        [
+          `baseUrl: https://example.com`,
+          `model: gpt-4o`,
+          `modelProvider: openai`,
+          `cacheDir: ${tmpCacheDir}`,
+          `tests:`,
+          `  - name: Login Flow`,
+          `    case: check that login works with valid credentials`,
+          `  - name: Login Error`,
+          `    case: check that login shows error with invalid credentials`,
+        ].join("\n"),
+      );
+
+      const { exitCode, stdout } = await runCli(
+        ["--config", tmpConfig, "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("(cache)");
+      expect(stdout).toContain("(ai)");
+      expect(stdout).toContain("2 tests, 1 cached");
+    });
+
+    test("--dry-run validates config (exits 2 on bad YAML)", async () => {
+      const { exitCode, stderr } = await runCli(
+        ["--config", "tests/fixtures/bad-syntax.yaml", "--dry-run"],
+      );
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain("YAML");
+    });
+
+    test("--dry-run exits 2 on missing API key", async () => {
+      const { exitCode, stderr } = await runCli(
+        ["--config", "tests/fixtures/valid-config.yaml", "--dry-run"],
+        { OPENAI_API_KEY: "" },
+      );
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain("Missing API key");
+    });
+
+    test("--dry-run skips preflight (unreachable baseUrl still exits 0)", async () => {
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+
+      const tmpConfig = join(tmpdir(), "sg-dry-run-preflight-test.yaml");
+      await Bun.write(
+        tmpConfig,
+        [
+          "baseUrl: http://127.0.0.1:19999",
+          "model: gpt-4o",
+          "modelProvider: openai",
+          "tests:",
+          "  - name: Test One",
+          "    case: check something",
+        ].join("\n"),
+      );
+
+      const { exitCode, stderr } = await runCli(
+        ["--config", tmpConfig, "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      expect(stderr).not.toContain("baseUrl unreachable");
+    });
+
+    test("--dry-run + --only filters then lists", async () => {
+      const { exitCode, stdout } = await runCli(
+        [
+          "--config",
+          "tests/fixtures/multi-test-config.yaml",
+          "--dry-run",
+          "--only",
+          "Login*",
+        ],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("Login Flow");
+      expect(stdout).toContain("Login Error");
+      expect(stdout).not.toContain("Dashboard Load");
+      expect(stdout).not.toContain("Checkout Process");
+      expect(stdout).toContain("2 tests");
+      expect(stdout).toMatch(/of 4/);
+    });
+
+    test("--dry-run shows header with dry-run annotation", async () => {
+      const { exitCode, stdout } = await runCli(
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("(dry-run)");
+    });
+  });
 });
