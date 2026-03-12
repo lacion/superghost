@@ -62,10 +62,10 @@ Plans:
   1. Running `superghost --output json --config tests.yaml` produces a single valid JSON object on stdout containing `version`, `success`, and full test results
   2. Human-readable progress output (spinners, step descriptions) continues on stderr simultaneously when `--output json` is active
   3. Commander.js help (`--help`) and version (`--version`) output is written to stderr, never stdout, so piping `--output json` through `JSON.parse()` never fails due to non-JSON preamble
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 09-01: --output flag infrastructure, JSON formatter, Commander stdout redirect, integration tests
+- [ ] 09-01-PLAN.md — JSON formatter functions, --output flag, configureOutput stderr redirect, unit and integration tests
 
 ### Phase 10: JUnit XML Output
 **Goal**: CI systems (GitHub Actions, Jenkins, GitLab) can consume SuperGhost results as JUnit XML for native test reporting and PR annotations
