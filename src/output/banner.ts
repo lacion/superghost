@@ -21,11 +21,7 @@ function rainbowLine(text: string, hueOffset: number): string {
 }
 
 const TITLE = "  Super Ghost  ";
-const BANNER_LINES = [
-  `   👻${TITLE}👻`,
-  `  ─────────────────────`,
-  `  AI-powered E2E testing`,
-];
+const BANNER_LINES = [`   👻${TITLE}👻`, `  ─────────────────────`, `  AI-powered E2E testing`];
 
 function renderBanner(hueOffset: number): string[] {
   return [
@@ -44,7 +40,7 @@ export async function animateBanner(): Promise<void> {
 
   if (!isTTY) {
     const lines = BANNER_LINES;
-    process.stdout.write(lines.join("\n") + "\n\n");
+    process.stdout.write(`${lines.join("\n")}\n\n`);
     return;
   }
 
@@ -57,7 +53,7 @@ export async function animateBanner(): Promise<void> {
         // Move cursor up N lines to overwrite previous frame
         process.stdout.write(`\x1b[${lines.length}A`);
       }
-      process.stdout.write(lines.join("\n") + "\n");
+      process.stdout.write(`${lines.join("\n")}\n`);
 
       if (frame < FRAMES - 1) {
         await new Promise<void>((resolve) => setTimeout(resolve, FRAME_MS));

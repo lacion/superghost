@@ -1,11 +1,11 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
+
 import { StepReplayer } from "../../../src/cache/step-replayer.ts";
-import type { CachedStep } from "../../../src/cache/types.ts";
+import { type CachedStep } from "../../../src/cache/types.ts";
 
 describe("StepReplayer", () => {
   test("replay() with all-successful steps returns { success: true }", async () => {
-    const executor = async (_name: string, _input: Record<string, unknown>) =>
-      "ok";
+    const executor = async (_name: string, _input: Record<string, unknown>) => "ok";
     const replayer = new StepReplayer(executor);
 
     const steps: CachedStep[] = [
@@ -19,10 +19,7 @@ describe("StepReplayer", () => {
 
   test("replay() calls executor with correct toolName and toolInput in order", async () => {
     const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
-    const executor = async (
-      name: string,
-      input: Record<string, unknown>,
-    ) => {
+    const executor = async (name: string, input: Record<string, unknown>) => {
       calls.push({ name, input });
       return "ok";
     };
@@ -80,8 +77,7 @@ describe("StepReplayer", () => {
   });
 
   test("replay() with empty steps returns { success: true }", async () => {
-    const executor = async (_name: string, _input: Record<string, unknown>) =>
-      "ok";
+    const executor = async (_name: string, _input: Record<string, unknown>) => "ok";
     const replayer = new StepReplayer(executor);
 
     const result = await replayer.replay([]);

@@ -13,20 +13,14 @@ async function runCli(
     stderr: "pipe",
     env: { ...process.env, NO_COLOR: "1", ...envOverrides },
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   const exitCode = await proc.exited;
   return { exitCode, stdout, stderr };
 }
 
 describe("CLI Pipeline Integration", () => {
   test("valid config without API key exits 2 with clear error naming env var", async () => {
-    const { exitCode, stderr } = await runCli(
-      ["--config", "tests/fixtures/valid-config.yaml"],
-      { OPENAI_API_KEY: "" },
-    );
+    const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/valid-config.yaml"], { OPENAI_API_KEY: "" });
     expect(exitCode).toBe(2);
     // Should show clear error about missing API key
     // Fixture uses model: gpt-4o / modelProvider: openai
@@ -35,30 +29,21 @@ describe("CLI Pipeline Integration", () => {
   });
 
   test("missing config file exits 2 with error and hint", async () => {
-    const { exitCode, stderr } = await runCli([
-      "--config",
-      "nonexistent.yaml",
-    ]);
+    const { exitCode, stderr } = await runCli(["--config", "nonexistent.yaml"]);
     expect(exitCode).toBe(2);
     expect(stderr).toContain("Config file not found");
     expect(stderr).toContain("superghost --config");
   });
 
   test("invalid config exits 2 with all validation errors", async () => {
-    const { exitCode, stderr } = await runCli([
-      "--config",
-      "tests/fixtures/invalid-config.yaml",
-    ]);
+    const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/invalid-config.yaml"]);
     expect(exitCode).toBe(2);
     expect(stderr).toContain("Invalid config");
     expect(stderr).toContain("issue");
   });
 
   test("bad YAML syntax exits 2 with syntax error", async () => {
-    const { exitCode, stderr } = await runCli([
-      "--config",
-      "tests/fixtures/bad-syntax.yaml",
-    ]);
+    const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/bad-syntax.yaml"]);
     expect(exitCode).toBe(2);
     expect(stderr).toContain("YAML");
   });
@@ -84,10 +69,9 @@ describe("CLI Pipeline Integration", () => {
   });
 
   test("--no-cache flag is accepted (exits 2 for missing API key, not unknown option)", async () => {
-    const { exitCode, stderr } = await runCli(
-      ["--config", "tests/fixtures/valid-config.yaml", "--no-cache"],
-      { OPENAI_API_KEY: "" },
-    );
+    const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/valid-config.yaml", "--no-cache"], {
+      OPENAI_API_KEY: "",
+    });
     expect(exitCode).toBe(2);
     // Should fail for missing API key, NOT for unknown option
     expect(stderr).toContain("Missing API key");
@@ -96,12 +80,7 @@ describe("CLI Pipeline Integration", () => {
 
   test("--only with zero matches exits 2 with available test names", async () => {
     const { exitCode, stderr } = await runCli(
-      [
-        "--config",
-        "tests/fixtures/multi-test-config.yaml",
-        "--only",
-        "nonexistent*",
-      ],
+      ["--config", "tests/fixtures/multi-test-config.yaml", "--only", "nonexistent*"],
       { OPENAI_API_KEY: "fake-key-for-filter-test" },
     );
     expect(exitCode).toBe(2);
@@ -128,24 +107,22 @@ describe("CLI Pipeline Integration", () => {
         "modelProvider: openai",
         "tests:",
         "  - name: Test One",
-        '    case: check something',
+        "    case: check something",
       ].join("\n"),
     );
 
-    const { exitCode, stderr } = await runCli(
-      ["--config", tmpConfig],
-      { OPENAI_API_KEY: "fake-key-for-preflight-test" },
-    );
+    const { exitCode, stderr } = await runCli(["--config", tmpConfig], {
+      OPENAI_API_KEY: "fake-key-for-preflight-test",
+    });
     expect(exitCode).toBe(2);
     expect(stderr).toContain("baseUrl unreachable");
     expect(stderr).toContain("127.0.0.1:19999");
   });
 
   test("config without baseUrl skips preflight (fails on API key instead)", async () => {
-    const { exitCode, stderr } = await runCli(
-      ["--config", "tests/fixtures/no-baseurl-config.yaml"],
-      { OPENAI_API_KEY: "" },
-    );
+    const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/no-baseurl-config.yaml"], {
+      OPENAI_API_KEY: "",
+    });
     expect(exitCode).toBe(2);
     // Should fail for missing API key, NOT for baseUrl unreachable
     // This proves preflight was skipped when no baseUrl is configured
@@ -157,12 +134,7 @@ describe("CLI Pipeline Integration", () => {
     // multi-test-config.yaml has baseUrl: https://example.com
     // Even if baseUrl were unreachable, --only zero-match should exit first
     const { exitCode, stderr } = await runCli(
-      [
-        "--config",
-        "tests/fixtures/multi-test-config.yaml",
-        "--only",
-        "nonexistent*",
-      ],
+      ["--config", "tests/fixtures/multi-test-config.yaml", "--only", "nonexistent*"],
       { OPENAI_API_KEY: "fake-key-for-order-test" },
     );
     expect(exitCode).toBe(2);
@@ -186,10 +158,9 @@ describe("CLI Pipeline Integration", () => {
     });
 
     test("--dry-run lists tests with source labels", async () => {
-      const { exitCode, stderr } = await runCli(
-        ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"],
-        { OPENAI_API_KEY: "fake-key" },
-      );
+      const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"], {
+        OPENAI_API_KEY: "fake-key",
+      });
       expect(exitCode).toBe(0);
       expect(stderr).toContain("Login Flow");
       expect(stderr).toContain("Login Error");
@@ -223,10 +194,7 @@ describe("CLI Pipeline Integration", () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await writeFile(
-        join(tmpCacheDir, `${hash}.json`),
-        JSON.stringify(cacheEntry, null, 2),
-      );
+      await writeFile(join(tmpCacheDir, `${hash}.json`), JSON.stringify(cacheEntry, null, 2));
 
       // Create a temp config pointing at the cache dir
       const tmpConfig = join(tmpdir(), "sg-dry-run-cache-test.yaml");
@@ -245,10 +213,7 @@ describe("CLI Pipeline Integration", () => {
         ].join("\n"),
       );
 
-      const { exitCode, stderr } = await runCli(
-        ["--config", tmpConfig, "--dry-run"],
-        { OPENAI_API_KEY: "fake-key" },
-      );
+      const { exitCode, stderr } = await runCli(["--config", tmpConfig, "--dry-run"], { OPENAI_API_KEY: "fake-key" });
       expect(exitCode).toBe(0);
       expect(stderr).toContain("(cache)");
       expect(stderr).toContain("(ai)");
@@ -256,18 +221,15 @@ describe("CLI Pipeline Integration", () => {
     });
 
     test("--dry-run validates config (exits 2 on bad YAML)", async () => {
-      const { exitCode, stderr } = await runCli(
-        ["--config", "tests/fixtures/bad-syntax.yaml", "--dry-run"],
-      );
+      const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/bad-syntax.yaml", "--dry-run"]);
       expect(exitCode).toBe(2);
       expect(stderr).toContain("YAML");
     });
 
     test("--dry-run exits 2 on missing API key", async () => {
-      const { exitCode, stderr } = await runCli(
-        ["--config", "tests/fixtures/valid-config.yaml", "--dry-run"],
-        { OPENAI_API_KEY: "" },
-      );
+      const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/valid-config.yaml", "--dry-run"], {
+        OPENAI_API_KEY: "",
+      });
       expect(exitCode).toBe(2);
       expect(stderr).toContain("Missing API key");
     });
@@ -289,23 +251,14 @@ describe("CLI Pipeline Integration", () => {
         ].join("\n"),
       );
 
-      const { exitCode, stderr } = await runCli(
-        ["--config", tmpConfig, "--dry-run"],
-        { OPENAI_API_KEY: "fake-key" },
-      );
+      const { exitCode, stderr } = await runCli(["--config", tmpConfig, "--dry-run"], { OPENAI_API_KEY: "fake-key" });
       expect(exitCode).toBe(0);
       expect(stderr).not.toContain("baseUrl unreachable");
     });
 
     test("--dry-run + --only filters then lists", async () => {
       const { exitCode, stderr } = await runCli(
-        [
-          "--config",
-          "tests/fixtures/multi-test-config.yaml",
-          "--dry-run",
-          "--only",
-          "Login*",
-        ],
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run", "--only", "Login*"],
         { OPENAI_API_KEY: "fake-key" },
       );
       expect(exitCode).toBe(0);
@@ -318,10 +271,9 @@ describe("CLI Pipeline Integration", () => {
     });
 
     test("--dry-run shows header with dry-run annotation", async () => {
-      const { exitCode, stderr } = await runCli(
-        ["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"],
-        { OPENAI_API_KEY: "fake-key" },
-      );
+      const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/multi-test-config.yaml", "--dry-run"], {
+        OPENAI_API_KEY: "fake-key",
+      });
       expect(exitCode).toBe(0);
       expect(stderr).toContain("(dry-run)");
     });
@@ -346,10 +298,9 @@ describe("CLI Pipeline Integration", () => {
     });
 
     test("--verbose flag is accepted (exits 2 for missing API key, not unknown option)", async () => {
-      const { exitCode, stderr } = await runCli(
-        ["--config", "tests/fixtures/valid-config.yaml", "--verbose"],
-        { OPENAI_API_KEY: "" },
-      );
+      const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/valid-config.yaml", "--verbose"], {
+        OPENAI_API_KEY: "",
+      });
       expect(exitCode).toBe(2);
       expect(stderr).toContain("Missing API key");
       expect(stderr).not.toContain("unknown option");

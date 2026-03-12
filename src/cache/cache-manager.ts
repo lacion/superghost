@@ -1,6 +1,7 @@
+import { mkdir, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
-import { mkdir, rename, readdir } from "node:fs/promises";
-import type { CacheEntry, CachedStep } from "./types.ts";
+
+import { type CachedStep, type CacheEntry } from "./types.ts";
 
 /**
  * Manages file-based cache entries for test step recordings.
@@ -103,7 +104,7 @@ export class CacheManager {
     const filePath = join(this.cacheDir, `${hash}.json`);
 
     try {
-      return await Bun.file(filePath).json() as CacheEntry;
+      return (await Bun.file(filePath).json()) as CacheEntry;
     } catch {
       return null;
     }

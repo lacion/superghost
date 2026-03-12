@@ -1,11 +1,9 @@
-import { describe, expect, it, beforeEach } from "bun:test";
+import { describe, expect, it } from "bun:test";
+
+import { type Config } from "../../../src/config/types.ts";
+import { type Reporter } from "../../../src/output/types.ts";
 import { TestRunner } from "../../../src/runner/test-runner.ts";
-import type { Reporter } from "../../../src/output/types.ts";
-import type { Config } from "../../../src/config/types.ts";
-import type {
-  TestResult,
-  RunResult,
-} from "../../../src/runner/types.ts";
+import { type RunResult, type TestResult } from "../../../src/runner/types.ts";
 
 /** Creates a minimal Config object for testing */
 function makeConfig(overrides: Partial<Config> = {}): Config {
@@ -62,10 +60,7 @@ describe("TestRunner", () => {
     });
     const { reporter } = createMockReporter();
 
-    const executeFn = async (
-      testCase: string,
-      _baseUrl: string,
-    ): Promise<TestResult> => {
+    const executeFn = async (testCase: string, _baseUrl: string): Promise<TestResult> => {
       if (testCase === "case c") {
         return {
           testName: "Test C",
@@ -99,10 +94,7 @@ describe("TestRunner", () => {
     const config = makeConfig();
     const { reporter, calls } = createMockReporter();
 
-    const executeFn = async (
-      testCase: string,
-      _baseUrl: string,
-    ): Promise<TestResult> => ({
+    const executeFn = async (testCase: string, _baseUrl: string): Promise<TestResult> => ({
       testName: testCase === "check that A works" ? "Test A" : "Test B",
       testCase,
       status: "passed",
@@ -148,9 +140,7 @@ describe("TestRunner", () => {
     const config = makeConfig();
     const { reporter, calls } = createMockReporter();
 
-    const executeFn = async (
-      testCase: string,
-    ): Promise<TestResult> => ({
+    const executeFn = async (testCase: string): Promise<TestResult> => ({
       testName: testCase === "check that A works" ? "Test A" : "Test B",
       testCase,
       status: "passed",
@@ -185,10 +175,7 @@ describe("TestRunner", () => {
     const { reporter } = createMockReporter();
 
     const receivedBaseUrls: string[] = [];
-    const executeFn = async (
-      testCase: string,
-      baseUrl: string,
-    ): Promise<TestResult> => {
+    const executeFn = async (testCase: string, baseUrl: string): Promise<TestResult> => {
       receivedBaseUrls.push(baseUrl);
       return {
         testName: testCase === "case a" ? "Default URL" : "Override URL",
@@ -214,10 +201,7 @@ describe("TestRunner", () => {
     const { reporter } = createMockReporter();
 
     let receivedBaseUrl = "not-set";
-    const executeFn = async (
-      testCase: string,
-      baseUrl: string,
-    ): Promise<TestResult> => {
+    const executeFn = async (testCase: string, baseUrl: string): Promise<TestResult> => {
       receivedBaseUrl = baseUrl;
       return {
         testName: "No URL",

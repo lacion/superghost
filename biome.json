@@ -6,13 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": [
-      "**",
-      "!!**/node_modules",
-      "!!**/dist",
-      "!!**/.superghost-cache",
-      "!!**/e2e"
-    ]
+    "includes": ["**", "!!**/node_modules", "!!**/dist", "!!**/.superghost-cache", "!!**/e2e"]
   },
   "formatter": {
     "enabled": true,
@@ -49,11 +43,7 @@
         "organizeImports": {
           "level": "on",
           "options": {
-            "groups": [
-              [":BUN:", ":NODE:", ":PACKAGE:"],
-              ":BLANK_LINE:",
-              [":ALIAS:", ":PATH:"]
-            ]
+            "groups": [[":BUN:", ":NODE:", ":PACKAGE:"], ":BLANK_LINE:", [":ALIAS:", ":PATH:"]]
           }
         }
       }

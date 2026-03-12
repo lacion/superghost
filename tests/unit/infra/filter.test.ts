@@ -2,12 +2,7 @@ import { describe, expect, it } from "bun:test";
 import picomatch from "picomatch";
 
 describe("picomatch glob filter behavior", () => {
-  const testNames = [
-    "Login Flow",
-    "Login Error",
-    "Dashboard Load",
-    "Checkout Process",
-  ];
+  const testNames = ["Login Flow", "Login Error", "Dashboard Load", "Checkout Process"];
 
   function filterTests(pattern: string): string[] {
     const isMatch = picomatch(pattern, { nocase: true });

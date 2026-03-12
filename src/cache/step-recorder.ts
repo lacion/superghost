@@ -1,4 +1,4 @@
-import type { CachedStep } from "./types.ts";
+import { type CachedStep } from "./types.ts";
 
 /**
  * Records MCP tool calls as CachedStep entries.

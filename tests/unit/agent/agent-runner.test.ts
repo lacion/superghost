@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 // Mock the "ai" module before importing the module under test
 const mockGenerateText = mock((_opts: any) =>
@@ -122,8 +122,7 @@ describe("executeAgent", () => {
     // Create tools that actually execute so steps get recorded
     const recordableTools = {
       browser_navigate: {
-        execute: async (_input: Record<string, unknown>) =>
-          "navigated to page",
+        execute: async (_input: Record<string, unknown>) => "navigated to page",
       },
     };
 

@@ -1,5 +1,7 @@
-import { describe, test, expect, afterAll } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+
 import { checkBaseUrlReachable } from "../../../src/infra/preflight.ts";
+
 describe("checkBaseUrlReachable", () => {
   const servers: ReturnType<typeof Bun.serve>[] = [];
 
@@ -15,9 +17,7 @@ describe("checkBaseUrlReachable", () => {
       },
     });
     servers.push(server);
-    await expect(
-      checkBaseUrlReachable(`http://localhost:${server.port}`),
-    ).resolves.toBeUndefined();
+    await expect(checkBaseUrlReachable(`http://localhost:${server.port}`)).resolves.toBeUndefined();
   });
 
   test("resolves for 404 response (reachability, not health)", async () => {
@@ -28,9 +28,7 @@ describe("checkBaseUrlReachable", () => {
       },
     });
     servers.push(server);
-    await expect(
-      checkBaseUrlReachable(`http://localhost:${server.port}`),
-    ).resolves.toBeUndefined();
+    await expect(checkBaseUrlReachable(`http://localhost:${server.port}`)).resolves.toBeUndefined();
   });
 
   test("resolves for 500 response", async () => {
@@ -41,15 +39,11 @@ describe("checkBaseUrlReachable", () => {
       },
     });
     servers.push(server);
-    await expect(
-      checkBaseUrlReachable(`http://localhost:${server.port}`),
-    ).resolves.toBeUndefined();
+    await expect(checkBaseUrlReachable(`http://localhost:${server.port}`)).resolves.toBeUndefined();
   });
 
   test("throws for unreachable URL", async () => {
-    await expect(
-      checkBaseUrlReachable("http://127.0.0.1:19999"),
-    ).rejects.toThrow();
+    await expect(checkBaseUrlReachable("http://127.0.0.1:19999")).rejects.toThrow();
   });
 
   test("throws on timeout", async () => {
@@ -63,8 +57,6 @@ describe("checkBaseUrlReachable", () => {
     });
     servers.push(server);
     // Use a very short timeout (100ms) for test speed
-    await expect(
-      checkBaseUrlReachable(`http://localhost:${server.port}`, 100),
-    ).rejects.toThrow();
+    await expect(checkBaseUrlReachable(`http://localhost:${server.port}`, 100)).rejects.toThrow();
   });
 });

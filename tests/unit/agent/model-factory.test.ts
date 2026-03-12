@@ -1,11 +1,6 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import {
-  inferProvider,
-  validateApiKey,
-  createModel,
-  ENV_VARS,
-  type ProviderName,
-} from "../../../src/agent/model-factory.ts";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+
+import { createModel, ENV_VARS, inferProvider, validateApiKey } from "../../../src/agent/model-factory.ts";
 
 describe("inferProvider", () => {
   test("claude-sonnet-4-6 returns anthropic", () => {
@@ -73,9 +68,7 @@ describe("validateApiKey", () => {
   });
 
   test("throws with correct env var name for google", () => {
-    expect(() => validateApiKey("google")).toThrow(
-      "GOOGLE_GENERATIVE_AI_API_KEY",
-    );
+    expect(() => validateApiKey("google")).toThrow("GOOGLE_GENERATIVE_AI_API_KEY");
   });
 
   test("throws with correct env var name for openrouter", () => {
@@ -83,15 +76,11 @@ describe("validateApiKey", () => {
   });
 
   test("error message includes provider name", () => {
-    expect(() => validateApiKey("anthropic")).toThrow(
-      "Missing API key for anthropic",
-    );
+    expect(() => validateApiKey("anthropic")).toThrow("Missing API key for anthropic");
   });
 
   test("error message includes how to set the key", () => {
-    expect(() => validateApiKey("anthropic")).toThrow(
-      "export ANTHROPIC_API_KEY=your-key-here",
-    );
+    expect(() => validateApiKey("anthropic")).toThrow("export ANTHROPIC_API_KEY=your-key-here");
   });
 });
 

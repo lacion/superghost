@@ -1,4 +1,4 @@
-import type { RunResult, TestResult } from "../runner/types.ts";
+import { type RunResult, type TestResult } from "../runner/types.ts";
 
 /** Describes a tool call in human-readable form */
 export interface StepDescription {

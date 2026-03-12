@@ -1,12 +1,9 @@
-import type { CachedStep } from "./types.ts";
-import type { OnStepProgress } from "../output/types.ts";
 import { describeToolCall } from "../output/tool-name-map.ts";
+import { type OnStepProgress } from "../output/types.ts";
+import { type CachedStep } from "./types.ts";
 
 /** Function signature for executing a tool by name with given input */
-export type ToolExecutor = (
-  toolName: string,
-  toolInput: Record<string, unknown>,
-) => Promise<string>;
+export type ToolExecutor = (toolName: string, toolInput: Record<string, unknown>) => Promise<string>;
 
 /** Result of replaying cached steps */
 export interface ReplayResult {

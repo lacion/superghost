@@ -1,6 +1,7 @@
 import { YAML } from "bun";
+
 import { ConfigSchema } from "./schema.ts";
-import type { Config } from "./types.ts";
+import { type Config } from "./types.ts";
 
 /** Error thrown when config loading or validation fails */
 export class ConfigLoadError extends Error {
@@ -39,8 +40,7 @@ export async function loadConfig(filePath: string): Promise<Config> {
       );
     }
     throw new ConfigLoadError(
-      `Cannot read config file: ${filePath}\n` +
-        `  ${error instanceof Error ? error.message : String(error)}`,
+      `Cannot read config file: ${filePath}\n` + `  ${error instanceof Error ? error.message : String(error)}`,
       error,
     );
   }
@@ -50,10 +50,7 @@ export async function loadConfig(filePath: string): Promise<Config> {
   try {
     raw = YAML.parse(content);
   } catch (error) {
-    throw new ConfigLoadError(
-      `Invalid YAML syntax: ${error instanceof Error ? error.message : String(error)}`,
-      error,
-    );
+    throw new ConfigLoadError(`Invalid YAML syntax: ${error instanceof Error ? error.message : String(error)}`, error);
   }
 
   // Layer 3: Zod validation
@@ -61,15 +58,10 @@ export async function loadConfig(filePath: string): Promise<Config> {
   const result = ConfigSchema.safeParse(raw);
   if (!result.success) {
     const issues = result.error.issues
-      .map(
-        (issue, i) =>
-          `  ${i + 1}. ${issue.path.join(".")}: ${issue.message}`,
-      )
+      .map((issue, i) => `  ${i + 1}. ${issue.path.join(".")}: ${issue.message}`)
       .join("\n");
     const count = result.error.issues.length;
-    throw new ConfigLoadError(
-      `Invalid config (${count} issue${count > 1 ? "s" : ""})\n${issues}`,
-    );
+    throw new ConfigLoadError(`Invalid config (${count} issue${count > 1 ? "s" : ""})\n${issues}`);
   }
 
   return result.data;

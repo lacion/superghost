@@ -1,4 +1,5 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
+
 import { StepRecorder } from "../../../src/cache/step-recorder.ts";
 
 describe("StepRecorder", () => {
@@ -26,8 +27,8 @@ describe("StepRecorder", () => {
 
     const steps = recorder.getSteps();
     expect(steps).toHaveLength(2);
-    expect(steps[0]!.toolName).toBe("browser_navigate");
-    expect(steps[1]!.toolName).toBe("browser_click");
+    expect(steps[0]?.toolName).toBe("browser_navigate");
+    expect(steps[1]?.toolName).toBe("browser_click");
   });
 
   test("getSteps() returns a copy (modifying returned array does not affect internal state)", () => {
@@ -99,9 +100,7 @@ describe("StepRecorder", () => {
 
       const wrapped = recorder.wrapTools(tools);
 
-      await expect(
-        wrapped.browser_click.execute({ selector: "#missing" }),
-      ).rejects.toThrow("Element not found");
+      await expect(wrapped.browser_click.execute({ selector: "#missing" })).rejects.toThrow("Element not found");
 
       // Step was NOT recorded
       expect(recorder.getSteps()).toEqual([]);
@@ -126,8 +125,8 @@ describe("StepRecorder", () => {
       await wrapped.browser_click.execute({ selector: "#btn" });
 
       expect(recorder.getSteps()).toHaveLength(2);
-      expect(recorder.getSteps()[0]!.toolName).toBe("browser_navigate");
-      expect(recorder.getSteps()[1]!.toolName).toBe("browser_click");
+      expect(recorder.getSteps()[0]?.toolName).toBe("browser_navigate");
+      expect(recorder.getSteps()[1]?.toolName).toBe("browser_click");
     });
   });
 });

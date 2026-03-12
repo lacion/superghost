@@ -1,9 +1,10 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { join } from "node:path";
-import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { CacheManager } from "../../../src/cache/cache-manager.ts";
-import type { CachedStep } from "../../../src/cache/types.ts";
+import { type CachedStep } from "../../../src/cache/types.ts";
 
 describe("CacheManager", () => {
   let cacheDir: string;
@@ -112,10 +113,10 @@ describe("CacheManager", () => {
       const entry = await manager.load(testCase, baseUrl);
 
       expect(entry).not.toBeNull();
-      expect(entry!.testCase).toBe(testCase);
-      expect(entry!.baseUrl).toBe(baseUrl);
-      expect(entry!.steps).toEqual(steps);
-      expect(entry!.model).toBe("claude-sonnet-4-6");
+      expect(entry?.testCase).toBe(testCase);
+      expect(entry?.baseUrl).toBe(baseUrl);
+      expect(entry?.steps).toEqual(steps);
+      expect(entry?.model).toBe("claude-sonnet-4-6");
     });
 
     test("returns null for nonexistent hash", async () => {
@@ -224,35 +225,41 @@ describe("CacheManager", () => {
     test("deletes files with version 1 and preserves files with version 2", async () => {
       // Create a v1 cache file
       const v1File = join(cacheDir, "v1entry.json");
-      await Bun.write(v1File, JSON.stringify({
-        version: 1,
-        testCase: "old test",
-        baseUrl: "http://localhost:3000",
-        steps: [],
-        model: "test",
-        provider: "test",
-        stepCount: 0,
-        aiMessage: "test",
-        durationMs: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }));
+      await Bun.write(
+        v1File,
+        JSON.stringify({
+          version: 1,
+          testCase: "old test",
+          baseUrl: "http://localhost:3000",
+          steps: [],
+          model: "test",
+          provider: "test",
+          stepCount: 0,
+          aiMessage: "test",
+          durationMs: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      );
 
       // Create a v2 cache file
       const v2File = join(cacheDir, "v2entry.json");
-      await Bun.write(v2File, JSON.stringify({
-        version: 2,
-        testCase: "new test",
-        baseUrl: "http://localhost:3000",
-        steps: [],
-        model: "test",
-        provider: "test",
-        stepCount: 0,
-        aiMessage: "test",
-        durationMs: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }));
+      await Bun.write(
+        v2File,
+        JSON.stringify({
+          version: 2,
+          testCase: "new test",
+          baseUrl: "http://localhost:3000",
+          steps: [],
+          model: "test",
+          provider: "test",
+          stepCount: 0,
+          aiMessage: "test",
+          durationMs: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      );
 
       await manager.migrateV1Cache();
 

@@ -1,7 +1,8 @@
-import pc from "picocolors";
 import { createSpinner } from "nanospinner";
-import type { Reporter, StepInfo } from "./types.ts";
-import type { TestResult, RunResult } from "../runner/types.ts";
+import pc from "picocolors";
+
+import { type RunResult, type TestResult } from "../runner/types.ts";
+import { type Reporter, type StepInfo } from "./types.ts";
 
 /**
  * Format milliseconds as a human-readable duration string.
@@ -16,7 +17,7 @@ export function formatDuration(ms: number): string {
 
 /** Write a line of text to stderr */
 export function writeStderr(text: string): void {
-  Bun.write(Bun.stderr, text + "\n");
+  Bun.write(Bun.stderr, `${text}\n`);
 }
 
 /**
@@ -64,7 +65,7 @@ export class ConsoleReporter implements Reporter {
     } else if (this.spinner) {
       let spinnerText = `${this.currentTestName} \u2014 ${step.description.full}`;
       if (spinnerText.length > 60) {
-        spinnerText = spinnerText.slice(0, 57) + "...";
+        spinnerText = `${spinnerText.slice(0, 57)}...`;
       }
       this.spinner.update(spinnerText);
     }
@@ -79,9 +80,7 @@ export class ConsoleReporter implements Reporter {
     writeStderr(`  ${bar}`);
     writeStderr(`    Total:   ${data.results.length}`);
     writeStderr(`    Passed:  ${pc.green(String(data.passed))}`);
-    writeStderr(
-      `    Failed:  ${data.failed > 0 ? pc.red(String(data.failed)) : String(data.failed)}`,
-    );
+    writeStderr(`    Failed:  ${data.failed > 0 ? pc.red(String(data.failed)) : String(data.failed)}`);
     if (data.skipped > 0) {
       writeStderr(`    Skipped: ${data.skipped}`);
     }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { loadConfig, ConfigLoadError } from "../../../src/config/loader.ts";
+
+import { ConfigLoadError, loadConfig } from "../../../src/config/loader.ts";
 
 const fixturesDir = join(import.meta.dir, "../../fixtures");
 

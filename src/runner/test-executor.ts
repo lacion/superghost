@@ -1,9 +1,9 @@
-import type { CacheManager } from "../cache/cache-manager.ts";
-import type { StepReplayer } from "../cache/step-replayer.ts";
-import type { AgentExecutionResult } from "../agent/types.ts";
-import type { Config } from "../config/types.ts";
-import type { TestResult } from "./types.ts";
-import type { OnStepProgress } from "../output/types.ts";
+import { type AgentExecutionResult } from "../agent/types.ts";
+import { type CacheManager } from "../cache/cache-manager.ts";
+import { type StepReplayer } from "../cache/step-replayer.ts";
+import { type Config } from "../config/types.ts";
+import { type OnStepProgress } from "../output/types.ts";
+import { type TestResult } from "./types.ts";
 
 /** Function signature for executing a test via the AI agent */
 type ExecuteAgentFn = (config: {
@@ -29,10 +29,9 @@ export class TestExecutor {
   private readonly executeAgentFn: ExecuteAgentFn;
   private readonly model: any;
   private readonly tools: Record<string, any>;
-  private readonly config: Pick<
-    Config,
-    "maxAttempts" | "recursionLimit" | "model" | "modelProvider"
-  > & { context?: string };
+  private readonly config: Pick<Config, "maxAttempts" | "recursionLimit" | "model" | "modelProvider"> & {
+    context?: string;
+  };
   private readonly globalContext?: string;
   private readonly noCache: boolean;
   private readonly onStepProgress?: OnStepProgress;
@@ -43,10 +42,7 @@ export class TestExecutor {
     executeAgentFn: ExecuteAgentFn;
     model?: any;
     tools?: Record<string, any>;
-    config: Pick<
-      Config,
-      "maxAttempts" | "recursionLimit" | "model" | "modelProvider"
-    > & { context?: string };
+    config: Pick<Config, "maxAttempts" | "recursionLimit" | "model" | "modelProvider"> & { context?: string };
     globalContext?: string;
     noCache?: boolean;
     onStepProgress?: OnStepProgress;
@@ -63,11 +59,7 @@ export class TestExecutor {
   }
 
   /** Execute a single test case with cache-first strategy */
-  async execute(
-    testCase: string,
-    baseUrl: string,
-    testContext?: string,
-  ): Promise<TestResult> {
+  async execute(testCase: string, baseUrl: string, testContext?: string): Promise<TestResult> {
     const start = Date.now();
 
     // Phase 1: Try cache replay (unless noCache)

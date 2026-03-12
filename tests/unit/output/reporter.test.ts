@@ -1,8 +1,8 @@
-import { describe, expect, it, spyOn, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+
 import { ConsoleReporter, formatDuration } from "../../../src/output/reporter.ts";
-import type { Reporter } from "../../../src/output/types.ts";
-import type { StepInfo } from "../../../src/output/types.ts";
-import type { RunResult, TestResult } from "../../../src/runner/types.ts";
+import { type Reporter, type StepInfo } from "../../../src/output/types.ts";
+import { type RunResult } from "../../../src/runner/types.ts";
 
 describe("formatDuration", () => {
   it("formats milliseconds under 1000 as Xms", () => {
@@ -27,14 +27,12 @@ describe("ConsoleReporter", () => {
   beforeEach(() => {
     reporter = new ConsoleReporter();
     stderrOutput = [];
-    writeSpy = spyOn(Bun, "write").mockImplementation(
-      async (dest: any, data: any) => {
-        if (dest === Bun.stderr) {
-          stderrOutput.push(String(data));
-        }
-        return data ? String(data).length : 0;
-      },
-    );
+    writeSpy = spyOn(Bun, "write").mockImplementation(async (dest: any, data: any) => {
+      if (dest === Bun.stderr) {
+        stderrOutput.push(String(data));
+      }
+      return data ? String(data).length : 0;
+    });
   });
 
   afterEach(() => {

@@ -1,4 +1,4 @@
-import type { Subprocess } from "bun";
+import { type Subprocess } from "bun";
 
 /**
  * Tracks spawned subprocesses and ensures cleanup on shutdown.
@@ -25,7 +25,11 @@ export class ProcessManager {
             proc.kill("SIGKILL");
           }
         }, 5000);
-        try { await proc.exited; } finally { clearTimeout(timeout); }
+        try {
+          await proc.exited;
+        } finally {
+          clearTimeout(timeout);
+        }
       }
     });
     await Promise.allSettled(kills);

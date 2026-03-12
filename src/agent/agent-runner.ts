@@ -1,10 +1,11 @@
 import { generateText, Output, stepCountIs } from "ai";
 import { z } from "zod";
+
 import { StepRecorder } from "../cache/step-recorder.ts";
-import type { AgentExecutionResult } from "./types.ts";
-import { buildSystemPrompt } from "./prompt.ts";
 import { describeToolCall } from "../output/tool-name-map.ts";
-import type { OnStepProgress } from "../output/types.ts";
+import { type OnStepProgress } from "../output/types.ts";
+import { buildSystemPrompt } from "./prompt.ts";
+import { type AgentExecutionResult } from "./types.ts";
 
 /**
  * Schema for structured agent output.
@@ -12,9 +13,7 @@ import type { OnStepProgress } from "../output/types.ts";
  */
 const TestResultSchema = z.object({
   passed: z.boolean().describe("Whether the test case passed"),
-  message: z
-    .string()
-    .describe("Brief diagnostic: what happened and what the page showed"),
+  message: z.string().describe("Brief diagnostic: what happened and what the page showed"),
 });
 
 /**
@@ -40,12 +39,7 @@ export async function executeAgent(config: {
   const recorder = new StepRecorder();
   const wrappedTools = recorder.wrapTools(config.tools);
 
-  const systemPrompt = buildSystemPrompt(
-    config.testCase,
-    config.baseUrl,
-    config.globalContext,
-    config.testContext,
-  );
+  const systemPrompt = buildSystemPrompt(config.testCase, config.baseUrl, config.globalContext, config.testContext);
 
   let stepCounter = 0;
 
@@ -60,11 +54,8 @@ export async function executeAgent(config: {
       ? (event: any) => {
           if (event.success) {
             stepCounter++;
-            const input = (event.toolCall.input ?? {}) as Record<
-              string,
-              unknown
-            >;
-            config.onStepProgress!({
+            const input = (event.toolCall.input ?? {}) as Record<string, unknown>;
+            config.onStepProgress?.({
               stepNumber: stepCounter,
               toolName: event.toolCall.toolName,
               input,

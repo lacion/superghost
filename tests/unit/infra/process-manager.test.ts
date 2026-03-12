@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+
 import { ProcessManager } from "../../../src/infra/process-manager.ts";
 
 /** Creates a mock subprocess for testing */

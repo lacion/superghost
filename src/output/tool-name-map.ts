@@ -1,4 +1,4 @@
-import type { StepDescription } from "./types.ts";
+import { type StepDescription } from "./types.ts";
 
 /** Maps raw MCP tool names to human-readable action names */
 const PREFIX_MAP: Record<string, string> = {
@@ -46,24 +46,15 @@ const KEY_ARG_MAP: Record<string, string> = {
  * Unknown tools fall back to: strip underscores, capitalize first letter.
  * Key arguments are extracted based on tool type (e.g., "url" for navigate).
  */
-export function describeToolCall(
-  toolName: string,
-  input: Record<string, unknown>,
-): StepDescription {
+export function describeToolCall(toolName: string, input: Record<string, unknown>): StepDescription {
   // Look up human name, or derive from raw name as fallback
-  const action =
-    PREFIX_MAP[toolName] ??
-    toolName
-      .replace(/_/g, " ")
-      .replace(/^\w/, (c) => c.toUpperCase());
+  const action = PREFIX_MAP[toolName] ?? toolName.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
   // Look up which input field is the key argument for this tool
   const keyArgField = KEY_ARG_MAP[toolName];
   const rawKeyArg = keyArgField ? input[keyArgField] : undefined;
   const keyArg =
-    rawKeyArg !== undefined && rawKeyArg !== null && String(rawKeyArg) !== ""
-      ? String(rawKeyArg)
-      : undefined;
+    rawKeyArg !== undefined && rawKeyArg !== null && String(rawKeyArg) !== "" ? String(rawKeyArg) : undefined;
 
   const full = keyArg ? `${action} \u2192 ${keyArg}` : action;
 

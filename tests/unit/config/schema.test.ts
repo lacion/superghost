@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { ConfigSchema, TestCaseSchema } from "../../../src/config/schema.ts";
 
 describe("TestCaseSchema", () => {

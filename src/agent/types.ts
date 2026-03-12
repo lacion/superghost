@@ -1,4 +1,4 @@
-import type { CachedStep } from "../cache/types.ts";
+import { type CachedStep } from "../cache/types.ts";
 
 /** Result of a single AI agent execution */
 export interface AgentExecutionResult {

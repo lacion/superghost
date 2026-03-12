@@ -14,15 +14,7 @@ describe("Binary Build Integration", () => {
     const hostTarget = `bun-${platform}-${arch}`;
 
     const proc = Bun.spawn(
-      [
-        "bun",
-        "build",
-        "--compile",
-        `--target=${hostTarget}`,
-        "src/cli.ts",
-        "--outfile",
-        "dist/test-binary",
-      ],
+      ["bun", "build", "--compile", `--target=${hostTarget}`, "src/cli.ts", "--outfile", "dist/test-binary"],
       {
         cwd: ROOT,
         stdout: "pipe",
@@ -43,29 +35,21 @@ describe("Binary Build Integration", () => {
     }
   });
 
-  test(
-    "compiles standalone binary for host platform",
-    async () => {
-      expect(buildExitCode).toBe(0);
-      const exists = await Bun.file(TEST_BINARY).exists();
-      expect(exists).toBe(true);
-    },
-    30_000,
-  );
+  test("compiles standalone binary for host platform", async () => {
+    expect(buildExitCode).toBe(0);
+    const exists = await Bun.file(TEST_BINARY).exists();
+    expect(exists).toBe(true);
+  }, 30_000);
 
-  test(
-    "compiled binary runs --version",
-    async () => {
-      const proc = Bun.spawn([TEST_BINARY, "--version"], {
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const stdout = await new Response(proc.stdout).text();
-      await new Response(proc.stderr).text();
-      const exitCode = await proc.exited;
-      expect(exitCode).toBe(0);
-      expect(stdout).toContain("0.2.0");
-    },
-    30_000,
-  );
+  test("compiled binary runs --version", async () => {
+    const proc = Bun.spawn([TEST_BINARY, "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("0.2.0");
+  }, 30_000);
 });

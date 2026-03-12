@@ -1,4 +1,4 @@
-import type { ProcessManager } from "./process-manager.ts";
+import { type ProcessManager } from "./process-manager.ts";
 
 /**
  * Register SIGINT and SIGTERM handlers that clean up all tracked subprocesses.

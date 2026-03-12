@@ -1,6 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Config } from "../config/types.ts";
+
+import { type Config } from "../config/types.ts";
 import { getMcpCommand } from "../dist/paths.ts";
 
 /**
@@ -12,8 +13,7 @@ import { getMcpCommand } from "../dist/paths.ts";
  * regardless of test type.
  */
 export class McpManager {
-  private playwrightClient: Awaited<ReturnType<typeof createMCPClient>> | null =
-    null;
+  private playwrightClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;
   private curlClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;
 
   constructor(private readonly config: Pick<Config, "browser" | "headless">) {}
@@ -27,11 +27,7 @@ export class McpManager {
     const playwrightCmd = getMcpCommand("@playwright/mcp");
     const curlCmd = getMcpCommand("@calibress/curl-mcp");
 
-    const playwrightArgs = [
-      ...playwrightCmd.args,
-      "--isolated",
-      `--browser=${this.config.browser}`,
-    ];
+    const playwrightArgs = [...playwrightCmd.args, "--isolated", `--browser=${this.config.browser}`];
 
     if (this.config.headless) {
       playwrightArgs.splice(playwrightCmd.args.length, 0, "--headless");
@@ -57,8 +53,8 @@ export class McpManager {
    * Provides ALL tools to the agent regardless of test type.
    */
   async getTools(): Promise<Record<string, any>> {
-    const playwrightTools = await this.playwrightClient!.tools();
-    const curlTools = await this.curlClient!.tools();
+    const playwrightTools = await this.playwrightClient?.tools();
+    const curlTools = await this.curlClient?.tools();
     return { ...playwrightTools, ...curlTools };
   }
 
@@ -68,10 +64,7 @@ export class McpManager {
    * even if one fails to close.
    */
   async close(): Promise<void> {
-    await Promise.allSettled([
-      this.playwrightClient?.close(),
-      this.curlClient?.close(),
-    ]);
+    await Promise.allSettled([this.playwrightClient?.close(), this.curlClient?.close()]);
     this.playwrightClient = null;
     this.curlClient = null;
   }

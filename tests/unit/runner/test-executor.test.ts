@@ -1,10 +1,10 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
+
+import { type AgentExecutionResult } from "../../../src/agent/types.ts";
+import { type CacheManager } from "../../../src/cache/cache-manager.ts";
+import { type StepReplayer } from "../../../src/cache/step-replayer.ts";
+import { type CachedStep, type CacheEntry } from "../../../src/cache/types.ts";
 import { TestExecutor } from "../../../src/runner/test-executor.ts";
-import type { CacheManager } from "../../../src/cache/cache-manager.ts";
-import type { StepReplayer } from "../../../src/cache/step-replayer.ts";
-import type { AgentExecutionResult } from "../../../src/agent/types.ts";
-import type { CacheEntry, CachedStep } from "../../../src/cache/types.ts";
-import type { TestResult } from "../../../src/runner/types.ts";
 
 /** Creates a mock CacheManager */
 function createMockCacheManager() {
@@ -90,10 +90,7 @@ describe("TestExecutor", () => {
       cacheManager.load.mockResolvedValue(FAKE_CACHE_ENTRY);
       replayer.replay.mockResolvedValue({ success: true });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("passed");
       expect(result.source).toBe("cache");
@@ -117,10 +114,7 @@ describe("TestExecutor", () => {
         steps: [{ toolName: "click", toolInput: { selector: "#new-btn" } }],
       });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("passed");
       expect(result.source).toBe("ai");
@@ -151,10 +145,7 @@ describe("TestExecutor", () => {
         config: { ...DEFAULT_CONFIG, maxAttempts: 1 },
       });
 
-      const result = await singleAttemptExecutor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await singleAttemptExecutor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("failed");
       expect(result.source).toBe("ai");
@@ -177,10 +168,7 @@ describe("TestExecutor", () => {
         steps: [],
       });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("failed");
       expect(executeAgentFn).toHaveBeenCalledTimes(3);
@@ -197,10 +185,7 @@ describe("TestExecutor", () => {
         steps: [{ toolName: "click", toolInput: { selector: "#btn" } }],
       });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("passed");
       expect(result.source).toBe("ai");
@@ -230,10 +215,7 @@ describe("TestExecutor", () => {
           steps: [],
         });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("failed");
       expect(result.source).toBe("ai");
@@ -264,10 +246,7 @@ describe("TestExecutor", () => {
           steps: [{ toolName: "click", toolInput: { selector: "#btn" } }],
         });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("passed");
       expect(result.source).toBe("ai");
@@ -281,8 +260,7 @@ describe("TestExecutor", () => {
       cacheManager.load.mockResolvedValue(null);
       executeAgentFn.mockResolvedValue({
         passed: false,
-        message:
-          "Login form not found on page — the page showed a 404 error",
+        message: "Login form not found on page — the page showed a 404 error",
         steps: [],
       });
 
@@ -293,15 +271,10 @@ describe("TestExecutor", () => {
         config: { ...DEFAULT_CONFIG, maxAttempts: 1 },
       });
 
-      const result = await singleAttemptExecutor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await singleAttemptExecutor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("failed");
-      expect(result.error).toBe(
-        "Login form not found on page — the page showed a 404 error",
-      );
+      expect(result.error).toBe("Login form not found on page — the page showed a 404 error");
     });
   });
 
@@ -314,11 +287,7 @@ describe("TestExecutor", () => {
         steps: [],
       });
 
-      await executor.execute(
-        "check login works",
-        "https://example.com",
-        "test-specific context",
-      );
+      await executor.execute("check login works", "https://example.com", "test-specific context");
 
       expect(executeAgentFn).toHaveBeenCalledTimes(1);
       const callArgs = (executeAgentFn.mock.calls as any[])[0][0] as Record<string, unknown>;
@@ -338,10 +307,7 @@ describe("TestExecutor", () => {
         steps: [],
       });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.durationMs).toBeGreaterThanOrEqual(0);
     });
@@ -364,10 +330,7 @@ describe("TestExecutor", () => {
         noCache: true,
       });
 
-      const result = await noCacheExecutor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await noCacheExecutor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("passed");
       expect(result.source).toBe("ai");
@@ -391,10 +354,7 @@ describe("TestExecutor", () => {
         noCache: true,
       });
 
-      await noCacheExecutor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      await noCacheExecutor.execute("check login works", "https://example.com");
 
       expect(cacheManager.save).toHaveBeenCalledTimes(1);
     });
@@ -403,10 +363,7 @@ describe("TestExecutor", () => {
       cacheManager.load.mockResolvedValue(FAKE_CACHE_ENTRY);
       replayer.replay.mockResolvedValue({ success: true });
 
-      const result = await executor.execute(
-        "check login works",
-        "https://example.com",
-      );
+      const result = await executor.execute("check login works", "https://example.com");
 
       expect(result.status).toBe("passed");
       expect(result.source).toBe("cache");

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { buildSystemPrompt } from "../../../src/agent/prompt.ts";
 
 describe("buildSystemPrompt", () => {
@@ -44,12 +45,7 @@ describe("buildSystemPrompt", () => {
   test("appends both global and per-test context (global first)", () => {
     const globalContext = "Shadow DOM enabled";
     const testContext = "Login as admin";
-    const prompt = buildSystemPrompt(
-      testCase,
-      baseUrl,
-      globalContext,
-      testContext,
-    );
+    const prompt = buildSystemPrompt(testCase, baseUrl, globalContext, testContext);
 
     const globalIdx = prompt.indexOf(globalContext);
     const testIdx = prompt.indexOf(testContext);
