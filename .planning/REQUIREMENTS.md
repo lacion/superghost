@@ -47,8 +47,8 @@ Requirements for v0.4 CI/CD + Team Readiness (Part 2). Each maps to roadmap phas
 
 ### Output Formats
 
-- [ ] **OUT-02**: User can run `--output junit` to get JUnit XML on stdout with `classname` attribute and `time` in seconds
-- [ ] **OUT-05**: JUnit XML includes `<properties>` per testcase with SuperGhost-specific metadata (source: cache/ai, selfHealed)
+- [x] **OUT-02**: User can run `--output junit` to get JUnit XML on stdout with `classname` attribute and `time` in seconds
+- [x] **OUT-05**: JUnit XML includes `<properties>` per testcase with SuperGhost-specific metadata (source: cache/ai, selfHealed)
 
 ### Config
 
@@ -127,8 +127,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OUT-01 | Phase 9 (v0.3) | Complete |
 | OUT-03 | Phase 9 (v0.3) | Complete |
 | OUT-04 | Phase 9 (v0.3) | Complete |
-| OUT-02 | Phase 14 (v0.4) | Pending |
-| OUT-05 | Phase 14 (v0.4) | Pending |
+| OUT-02 | Phase 14 (v0.4) | Complete |
+| OUT-05 | Phase 14 (v0.4) | Complete |
 | CFG-01 | Phase 15 (v0.4) | Pending |
 | CFG-02 | Phase 15 (v0.4) | Pending |
 | CFG-03 | Phase 15 (v0.4) | Pending |
