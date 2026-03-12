@@ -49,10 +49,10 @@
   2. Running `bun run lint:fix` auto-fixes all fixable violations (formatting, import sorting) in place
   3. The full existing codebase (all `.ts` files) passes `bun run lint` with zero violations after a one-time formatting commit
   4. A single `biome.json` at the project root configures all linting, formatting, and import sorting rules
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 08-01: Biome installation, config, npm scripts, and codebase formatting baseline
+- [ ] 08-01-PLAN.md — Install Biome, configure biome.json, add lint scripts, apply baseline formatting
 
 ### Phase 9: JSON Output
 **Goal**: Users can pipe SuperGhost results to `jq`, scripts, or CI tools via a machine-readable JSON format on stdout while still seeing human-readable progress on stderr
