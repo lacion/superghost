@@ -1,192 +1,412 @@
 # Stack Research
 
-**Domain:** AI-powered E2E browser testing CLI tool
-**Researched:** 2026-03-11 (updated for v0.2 DX features)
-**Confidence:** HIGH — all versions verified against npm and official docs as of today
+**Domain:** CI/CD output formats, code quality enforcement, and config interpolation for AI-powered E2E testing CLI
+**Researched:** 2026-03-12 (v0.3 CI/CD + Team Readiness milestone)
+**Confidence:** HIGH -- all versions verified against npm/official docs, JUnit XML format verified against testmoapp/junitxml spec
 
 ---
 
-## v0.2 Stack Additions
+## Scope
 
-These are the *only new additions* required for the DX Polish + Reliability Hardening milestone. The existing v1.0 stack (Bun, Commander.js, Zod, nanospinner, picocolors, Vercel AI SDK, Playwright MCP) is unchanged.
+This research covers ONLY the stack additions needed for v0.3. The existing validated stack is unchanged:
 
-### New Libraries Needed
+- Bun >=1.2.0, TypeScript 5.x, Vercel AI SDK 6.x, Commander.js 14.x, Zod 4.x, `yaml`, picocolors, picomatch, nanospinner
+- All output currently goes to stderr via `writeStderr()` helper; stdout is reserved for structured output (this is the correct foundation for JSON/JUnit)
 
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| `picomatch` | ^4.0.3 | Pattern matching for `--only <pattern>` test filter | Zero dependencies, no-install footprint, fastest glob matcher available (4.4M ops/sec vs minimatch's 630K). Used by Jest, Astro, Rollup, chokidar, fast-glob. Pure JS so Bun-native. API: `isMatch(testName, pattern)` — one function call. |
-| `@types/picomatch` | ^4.0.2 | TypeScript types for picomatch | picomatch ships no bundled types; DefinitelyTyped provides them. Active maintenance confirmed (updated July 2025). |
+Five new capability areas need stack decisions:
 
-### No Other New Dependencies
-
-Every other v0.2 feature is implementable with what's already installed:
-
-| Feature | Approach | Uses |
-|---------|---------|------|
-| `--dry-run`, `--verbose`, `--no-cache` flags | Commander.js `.option()` — already in codebase | `commander@14.0.3` (existing) |
-| `--only <pattern>` flag | Commander.js `.option('-o, --only <pattern>', ...)` + picomatch | `commander@14.0.3` + new `picomatch` |
-| Preflight `baseUrl` reachability check | Bun-native `fetch()` with `AbortSignal.timeout()` | Bun built-in (no new dep) |
-| Real-time step progress text | `nanospinner`'s `.update({ text })` method — already installed | `nanospinner@1.2.2` (existing) |
-| Distinct exit codes (0/1/2) | `process.exitCode` assignment + `Commander.program.error()` | Bun built-in + `commander` (existing) |
-| Cache key normalization | Normalize string before `Bun.CryptoHasher` hashing | Bun built-in (no new dep) |
+1. JSON output format (`--output json`)
+2. JUnit XML output format (`--output junit`)
+3. Linting/formatting enforcement (Biome)
+4. GitHub Actions PR workflow
+5. Env var interpolation in YAML configs
 
 ---
 
-## Commander.js Patterns for v0.2 Flags
+## Recommended Stack Additions
 
-All flags wire directly into the existing `program` definition in `src/cli.ts`. Commander.js 14 already in use — no API changes needed.
+### 1. JSON Output -- No New Dependencies
 
-### Boolean flags
+**Decision: Hand-craft JSON output. Zero new libraries.**
 
-```typescript
-program
-  .option('--dry-run', 'Preview which tests would run without executing them')
-  .option('--verbose', 'Show detailed step output during AI execution')
-  .option('--no-cache', 'Bypass cache — force AI re-execution for all tests')
-```
-
-`--no-cache` uses Commander's built-in negatable option convention: defining `--no-cache` automatically sets `options.cache = false` when passed (Commander infers the positive default as `true`). No extra logic needed.
-
-### Option with string argument
+The existing `RunResult` and `TestResult` types contain everything needed. `JSON.stringify()` is built into every runtime. The JSON output is a direct serialization of the run results.
 
 ```typescript
-program
-  .option('--only <pattern>', 'Run only tests whose names match the glob pattern')
-```
+// src/output/json-reporter.ts
+import type { Reporter } from "./types.ts";
+import type { TestResult, RunResult } from "../runner/types.ts";
 
-Accessed as `options.only` (string | undefined) in the `.action()` handler.
+export class JsonReporter implements Reporter {
+  private results: TestResult[] = [];
 
-### Exit codes with Commander
-
-```typescript
-// Config/runtime errors → exit 2
-program.error('Config error: ' + message, { exitCode: 2 })
-
-// Test failures → exit 1 (already implemented)
-// All pass → exit 0 (already implemented)
-```
-
-`program.error()` is the correct Commander.js API for emitting errors with custom exit codes. Confirmed in Commander.js docs: `program.error(message, { exitCode: 2, code: 'superghost.config.error' })`.
-
----
-
-## picomatch Integration Pattern
-
-```typescript
-import { isMatch } from 'picomatch'
-
-// In test-runner.ts, filter tests before executing
-const testsToRun = options.only
-  ? config.tests.filter(t => isMatch(t.name, options.only!))
-  : config.tests
-
-if (testsToRun.length === 0) {
-  program.error(`No tests matched pattern: ${options.only}`, { exitCode: 2 })
-}
-```
-
-`isMatch(string, pattern)` returns `boolean`. Pattern supports `*` (single segment), `**` (any depth), `?` (single char), and `{a,b}` alternation — sufficient for test name filtering.
-
----
-
-## Preflight baseUrl Check Pattern
-
-No new dependency. Use Bun-native `fetch()` with `AbortSignal.timeout()`:
-
-```typescript
-async function checkBaseUrlReachable(url: string, timeoutMs = 5000): Promise<void> {
-  try {
-    const response = await fetch(url, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    // Accept any HTTP response (even 404) — we only care the server is reachable
-    // A 404 from a live server is still reachable
-  } catch (err) {
-    if (err instanceof Error && err.name === 'TimeoutError') {
-      program.error(`baseUrl unreachable (timeout after ${timeoutMs}ms): ${url}`, { exitCode: 2 })
-    }
-    program.error(`baseUrl unreachable: ${url} — ${(err as Error).message}`, { exitCode: 2 })
+  onTestStart(_testName: string): void {}
+  onTestComplete(result: TestResult): void {
+    this.results.push(result);
+  }
+  onRunComplete(data: RunResult): void {
+    // Write to stdout (not stderr) for programmatic consumption
+    const output = JSON.stringify({
+      version: 1,
+      timestamp: new Date().toISOString(),
+      summary: {
+        total: data.results.length,
+        passed: data.passed,
+        failed: data.failed,
+        cached: data.cached,
+        skipped: data.skipped,
+        durationMs: data.totalDurationMs,
+      },
+      tests: data.results.map(r => ({
+        name: r.testName,
+        case: r.testCase,
+        status: r.status,
+        source: r.source,
+        durationMs: r.durationMs,
+        error: r.error ?? null,
+        selfHealed: r.selfHealed ?? false,
+      })),
+    }, null, 2);
+    process.stdout.write(output + "\n");
   }
 }
 ```
 
-`AbortSignal.timeout()` is a standard Web API — fully supported in Bun. No `axios`, no `got`, no `node-fetch`.
+**Why no library:** The output shape is trivially small. Adding `fast-json-stringify` or similar for a ~20-field object is over-engineering. `JSON.stringify` with indent 2 produces human-readable output. Including a `version: 1` field enables schema evolution without breaking consumers.
 
----
+**Integration point:** The `ConsoleReporter` already writes everything to stderr. A `JsonReporter` writes structured output to stdout. Both implement the `Reporter` interface. The `--output json` flag swaps which reporter is used. Diagnostic output (spinners, progress) can still go to stderr via a secondary `ConsoleReporter` when `--verbose` is combined with `--output json`.
 
-## Real-Time Step Progress
+### 2. JUnit XML Output -- No New Dependencies
 
-`nanospinner@1.2.2` already installed. The `.update({ text })` method on the running spinner is the correct API:
+**Decision: Hand-craft JUnit XML string generation. Zero new libraries.**
 
-```typescript
-// In agent-runner.ts or wherever step callbacks fire
-spinner.update({ text: `[${stepIndex}/${totalSteps}] ${stepDescription}` })
+| Considered | Version | Why NOT |
+|------------|---------|---------|
+| `junit-xml` | 0.3.1 | Tiny package (0.3.x) with limited adoption. Its API is a single function that takes an object and returns XML -- we can write the same 40 lines of XML escaping ourselves and avoid a dependency that may go unmaintained. |
+| `junit-report-builder` | 5.x | Designed for Jenkins-style reports with `writeTo(file)` API. We need stdout output, not file writes. Heavier API surface than needed. |
+| `xmlbuilder2` | 3.x | Full XML builder library. Massive overkill for a fixed 3-element XML format. |
+
+**Why hand-craft:** JUnit XML has a well-defined, stable format (unchanged since ~2009). SuperGhost's output is a single `<testsuites>` with one `<testsuite>` and N `<testcase>` elements. The entire XML generation is ~50 lines including XML escaping. Adding a dependency for this introduces supply chain risk for zero benefit.
+
+**JUnit XML spec** (verified against [testmoapp/junitxml](https://github.com/testmoapp/junitxml)):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="superghost" tests="3" failures="1" errors="0" time="4.2">
+  <testsuite name="superghost" tests="3" failures="1" errors="0" time="4.2"
+             timestamp="2026-03-12T10:00:00Z">
+    <testcase name="Login flow" classname="superghost" time="1.2"/>
+    <testcase name="Search products" classname="superghost" time="2.8">
+      <failure message="Expected search results to contain 'Widget'"
+               type="AssertionError">
+        AI execution failed: search results page did not contain expected text
+      </failure>
+    </testcase>
+    <testcase name="Checkout" classname="superghost" time="0.2">
+      <skipped message="Filtered by --only"/>
+    </testcase>
+  </testsuite>
+</testsuites>
 ```
 
-The `.update()` call accepts the same options as `createSpinner()` — text, color, frames, interval. No spinner restart needed. This directly addresses the "real-time step progress output during AI execution" feature without adding any library.
+Required attributes per element:
+- `<testsuites>`: `name`, `tests`, `failures`, `errors`, `time` (seconds, decimal)
+- `<testsuite>`: `name`, `tests`, `failures`, `errors`, `time`, `timestamp` (ISO 8601)
+- `<testcase>`: `name`, `classname`, `time` (seconds, decimal)
+- `<failure>`: `message`, `type` (optional but recommended)
+- `<skipped>`: `message` (optional)
 
----
+**XML escaping** is the only non-trivial part -- 5 characters need escaping (`&`, `<`, `>`, `"`, `'`). A single helper function handles this.
 
-## Cache Key Normalization
+**Integration point:** Same as JSON -- a `JUnitReporter` implements the `Reporter` interface, collects results, and writes XML to stdout on `onRunComplete`. CI tools (GitHub Actions, Jenkins, GitLab) consume the file by redirecting stdout: `superghost --config tests.yaml --output junit > test-results.xml`
 
-No new dependency. Normalize the test case string before hashing:
+**CI consumption:** Use `mikepenz/action-junit-report@v6` in GitHub Actions to display JUnit results as PR check annotations. This action supports both `<failure>` and `<error>` elements and nested suites.
 
-```typescript
-// In cache-manager.ts, update hashKey()
-static hashKey(testCase: string, baseUrl: string): string {
-  // Normalize: collapse whitespace, trim, lowercase for consistent keys
-  const normalizedCase = testCase.replace(/\s+/g, ' ').trim().toLowerCase()
-  const normalizedUrl = baseUrl.trim().toLowerCase()
-  const input = `${normalizedCase}|${normalizedUrl}`
-  const hasher = new Bun.CryptoHasher('sha256')
-  hasher.update(input)
-  return hasher.digest('hex').slice(0, 16)
+### 3. Linting/Formatting -- Biome
+
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `@biomejs/biome` | ^2.4.6 | Linting + formatting + import sorting | Single tool replaces ESLint + Prettier + eslint-plugin-import. 20-100x faster (written in Rust). First-class TypeScript type-aware linting without requiring the TypeScript compiler. `biome ci` command designed for CI read-only checks. Zero configuration needed for sensible defaults. Bun-compatible (pure binary, no Node.js dependency). |
+
+**Why Biome over ESLint + Prettier:**
+
+| Criteria | Biome | ESLint + Prettier |
+|----------|-------|-------------------|
+| Install footprint | 1 package | 5+ packages (eslint, prettier, @typescript-eslint/parser, @typescript-eslint/eslint-plugin, eslint-config-prettier, eslint-plugin-prettier) |
+| Config files | 1 (biome.json) | 2-3 (.eslintrc, .prettierrc, possibly .eslintignore) |
+| CI speed | ~50ms for 4K LOC | ~2-5s for same codebase |
+| Type-aware linting | Built-in (v2+), no TSC dependency | Requires TypeScript compiler, slow |
+| Import sorting | Built-in with merge support | Requires eslint-plugin-import or separate tool |
+| Bun compatibility | Native binary, works everywhere | Mostly works, occasional ESM resolution issues |
+| Rule count | 450+ rules | More with plugins, but diminishing returns |
+
+**Installation:**
+
+```bash
+bun add -D --exact @biomejs/biome
+```
+
+The `--exact` flag is recommended because Biome follows rapid release cycles. Pinning prevents surprise rule additions in CI.
+
+**Configuration (`biome.json`):**
+
+```json
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.6/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "warn"
+      },
+      "style": {
+        "noNonNullAssertion": "warn"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "files": {
+    "ignore": [
+      "node_modules",
+      ".superghost-cache",
+      "dist",
+      "*.d.ts"
+    ]
+  }
 }
 ```
 
-Pure string normalization — no library, no new Bun API. Breaking change: existing caches will produce different hashes. Document as cache-invalidating change in v0.2 release notes.
+**package.json scripts:**
+
+```json
+{
+  "scripts": {
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
+    "ci:lint": "biome ci src/"
+  }
+}
+```
+
+**Key Biome CLI commands:**
+- `biome check` -- runs formatter + linter + import sorting (read-only by default, `--write` to auto-fix)
+- `biome ci` -- same as `biome check` but optimized for CI (read-only, exits non-zero on violations, no `--write` flag accepted)
+- `biome check --changed` -- only check files changed since last commit (fast incremental checks)
+- `biome ci --reporter=github` -- GitHub-native annotation output for inline PR comments
+
+### 4. GitHub Actions PR Workflow -- No New Dependencies
+
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `oven-sh/setup-bun` | v2 | Install Bun in GitHub Actions | Official action by the Bun team (oven-sh). Verified on GitHub Marketplace. Supports version pinning, caching, and `bun-version-file` for lockfile-based version detection. |
+| `mikepenz/action-junit-report` | v6 | Display JUnit XML as PR check annotations | Parses JUnit XML files and creates GitHub check annotations with pass/fail details inline on the PR. Supports `<failure>` and `<error>` elements. |
+
+**Workflow structure (`.github/workflows/pr.yml`):**
+
+```yaml
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bunx tsc --noEmit
+      - name: Lint & Format
+        run: bunx biome ci src/
+      - name: Unit Tests
+        run: bun test
+```
+
+**Key decisions:**
+- `bun install --frozen-lockfile` ensures reproducible installs in CI (fails if lockfile is stale)
+- `biome ci` (not `biome check`) for CI -- read-only, exits non-zero on violations
+- Typecheck and lint run as separate steps for clear failure attribution
+- Unit tests run after lint (fast fail on code quality before slower tests)
+- No E2E test gate in PR workflow (requires API keys, browser, too slow for PR feedback loop)
+
+### 5. Env Var Interpolation -- No New Dependencies
+
+**Decision: Implement `${VAR}` interpolation as a pre-processing step in `loadConfig()`. Zero new libraries.**
+
+| Considered | Why NOT |
+|------------|---------|
+| `yaml-env-defaults` | Wraps `js-yaml` (not Bun's built-in `YAML.parse`). Would require replacing the YAML parser. |
+| `dotenv-expand` | Designed for `.env` files, not YAML content. Wrong tool. |
+| `envsub` / `envsubst` | CLI tools, not programmatic APIs. Shell-level substitution. |
+| EJS templating | Massive overkill. Introduces an entire template engine for simple variable substitution. |
+
+**Why hand-craft:** The interpolation is a single regex replacement on the raw YAML string before parsing. Docker Compose uses the same approach. The implementation is ~20 lines:
+
+```typescript
+/**
+ * Interpolate ${VAR} and ${VAR:-default} patterns in a string.
+ * Follows Docker Compose interpolation conventions.
+ * Runs on raw YAML text BEFORE parsing, so Zod validation
+ * catches any issues from missing/wrong env vars.
+ */
+function interpolateEnvVars(content: string): string {
+  return content.replace(
+    /\$\{([^}]+)\}/g,
+    (_match, expr: string) => {
+      // ${VAR:-default} -- use default if VAR is unset or empty
+      const defaultMatch = expr.match(/^(\w+):-(.*)$/);
+      if (defaultMatch) {
+        const [, varName, defaultValue] = defaultMatch;
+        return process.env[varName] || defaultValue;
+      }
+
+      // ${VAR:?error} -- error if VAR is unset or empty
+      const errorMatch = expr.match(/^(\w+):\?(.*)$/);
+      if (errorMatch) {
+        const [, varName, errorMsg] = errorMatch;
+        const value = process.env[varName];
+        if (!value) {
+          throw new ConfigLoadError(
+            `Required env var ${varName} is not set: ${errorMsg}`
+          );
+        }
+        return value;
+      }
+
+      // ${VAR} -- simple substitution
+      const varName = expr.trim();
+      const value = process.env[varName];
+      if (value === undefined) {
+        throw new ConfigLoadError(
+          `Env var ${varName} is not set. Use \${${varName}:-default} for a fallback.`
+        );
+      }
+      return value;
+    }
+  );
+}
+```
+
+**Supported syntax** (matching Docker Compose conventions):
+
+| Pattern | Behavior |
+|---------|----------|
+| `${VAR}` | Substitutes value of `VAR`. Error if unset. |
+| `${VAR:-default}` | Substitutes `VAR` if set and non-empty, otherwise `default`. |
+| `${VAR:?error message}` | Substitutes `VAR` if set and non-empty, otherwise throws with `error message`. |
+| `$$` | Literal `$` (escape hatch) |
+
+**Integration point:** Interpolation runs in `loadConfig()` between file read (Layer 1) and YAML parse (Layer 2):
+
+```typescript
+export async function loadConfig(filePath: string): Promise<Config> {
+  // Layer 1: Read file
+  const content = await file.text();
+
+  // Layer 1.5: Env var interpolation (NEW)
+  const interpolated = interpolateEnvVars(content);
+
+  // Layer 2: YAML parsing
+  const raw = YAML.parse(interpolated);
+
+  // Layer 3: Zod validation (catches type mismatches from bad env vars)
+  ...
+}
+```
+
+This approach is clean because:
+- Zod validation still catches all type errors (e.g., `timeout: ${NOT_A_NUMBER}` will fail Zod's `.number()` check after YAML parses "abc" as a string)
+- No changes needed to the Zod schema or types
+- Works with any YAML value position (strings, URLs, numbers after YAML parsing)
+
+**YAML config example:**
+
+```yaml
+baseUrl: ${BASE_URL:-http://localhost:3000}
+model: ${SUPERGHOST_MODEL:-claude-sonnet-4-6}
+tests:
+  - name: Login with test credentials
+    case: >
+      Navigate to ${BASE_URL:-http://localhost:3000}/login,
+      enter username ${TEST_USER:?TEST_USER env var required}
+      and password ${TEST_PASSWORD:?TEST_PASSWORD env var required},
+      click Login, verify dashboard loads.
+```
 
 ---
 
 ## Installation
 
 ```bash
-# Single new production dependency for --only pattern matching
-bun add picomatch
+# Single new dev dependency for v0.3
+bun add -D --exact @biomejs/biome
 
-# TypeScript types for picomatch (dev dependency)
-bun add -D @types/picomatch
+# Initialize Biome config
+bunx biome init
 ```
 
-That's it. All other v0.2 features use existing dependencies or Bun built-ins.
+That is the ONLY new package. JSON output, JUnit XML output, env var interpolation, and GitHub Actions workflow all require zero new npm dependencies.
 
 ---
 
-## Recommended Stack (Full, v0.2)
+## Recommended Stack (Full, v0.3)
 
-### Core Technologies
+### Core Technologies (unchanged from v0.2)
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| Bun | >=1.2.0 | Runtime, package manager, test runner, bundler |
+| TypeScript | 5.x | Language (strict mode, runs natively in Bun) |
+| Vercel AI SDK (`ai`) | ^6.0.116 | LLM orchestration, agentic tool loops |
+| Commander.js | ^14.0.3 | CLI argument parsing |
+| Zod | ^4.3.6 | Config schema validation |
+| `yaml` (Bun built-in) | N/A | YAML parsing via `YAML.parse()` |
+| nanospinner | ^1.2.2 | Terminal spinner + progress |
+| picocolors | ^1.1.1 | Terminal colors |
+| picomatch | ^4.0.3 | Glob pattern matching for `--only` |
+
+### New for v0.3
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| Bun | >=1.2.0 | Runtime, package manager, test runner, bundler, binary compiler | Native TypeScript execution without transpilation. `bun build --compile` produces standalone binaries. Anthropic ships Claude Code as a Bun binary. `AbortSignal.timeout()` and `Bun.CryptoHasher` are built-in — no extra deps for preflight checks or hashing. |
-| TypeScript | 5.x (via Bun) | Language | Strict mode; Bun runs `.ts` directly. Type-safe APIs with Zod catch config errors early. |
-| Vercel AI SDK (`ai`) | 6.0.116 | LLM orchestration, agentic tool loops | SDK 6 ships stable `generateText` with `stopWhen`/`stepCountIs`. Single unified API across all providers. |
-| Commander.js | 14.0.3 | CLI argument parsing | 118K+ dependents. `--no-cache` negatable option, `--only <pattern>` string option, and `program.error(msg, { exitCode: 2 })` for config errors all supported natively. |
-| Zod | 4.3.6 | YAML config schema validation | v4 is 14x faster than v3. First-class TypeScript inference from schema. |
-| `yaml` | 2.8.2 | YAML file parsing | Canonical YAML parser. No dependencies, ships own types. |
-| `nanospinner` | 1.2.2 | Terminal spinner + real-time progress text | `.update({ text })` API allows dynamic step progress updates without restarting spinner. Auto-disables in non-TTY CI environments. |
-| `picocolors` | 1.1.1 | Terminal color output | 3x smaller than chalk. No configuration needed — colors auto-disabled in non-TTY. |
-| `picomatch` | ^4.0.3 | Glob pattern matching for `--only` flag | Zero dependencies, fastest JS glob (v0.2 addition). Used by Jest, Rollup, chokidar. |
+| `@biomejs/biome` | ^2.4.6 (exact) | Lint + format + import sorting | Single Rust binary replaces ESLint+Prettier. 20-100x faster. `biome ci` for CI. Type-aware linting without TSC. |
 
-### Provider Packages (unchanged from v1.0)
+### GitHub Actions (not npm packages)
 
-| Package | Version | Provider |
-|---------|---------|---------|
-| `@ai-sdk/anthropic` | ^3.0.58 | Anthropic (Claude) — default |
-| `@ai-sdk/openai` | ^3.0.41 | OpenAI (GPT-4o, o3) |
-| `@ai-sdk/google` | ^3.0.37 | Google Gemini |
-| `@openrouter/ai-sdk-provider` | ^2.2.5 | OpenRouter (300+ models) |
+| Action | Version | Purpose |
+|--------|---------|---------|
+| `oven-sh/setup-bun` | v2 | Install Bun in CI |
+| `mikepenz/action-junit-report` | v6 | Display JUnit results as PR annotations |
+| `actions/checkout` | v4 | Checkout code |
 
 ---
 
@@ -194,12 +414,15 @@ That's it. All other v0.2 features use existing dependencies or Bun built-ins.
 
 | Recommended | Alternative | Why Not |
 |-------------|-------------|---------|
-| `picomatch` | `minimatch@10.x` | minimatch has active CVEs (CVE-2026-26996, a ReDoS via repeated wildcards). picomatch is 7x faster and zero-dep. For simple CLI test name filtering, picomatch is the correct level of tool. |
-| `picomatch` | `micromatch@4.x` | micromatch wraps picomatch and adds brace expansion. For CLI test name matching we don't need file system operations or brace expansion. picomatch directly is the minimal, correct choice. |
-| `picomatch` | Custom `RegExp` | Manual regex from user glob patterns is error-prone and a security risk (ReDoS). Use a battle-tested library. |
-| Bun built-in `fetch()` | `axios`, `got`, `node-fetch` | Zero reason to add an HTTP client library for a single reachability check. Bun's `fetch` + `AbortSignal.timeout()` is standard, fast, and already available. |
-| `nanospinner.update()` | `ora` (new dep) | `nanospinner` is already installed and has the `.update()` API needed. Adding `ora` would be redundant. |
-| `commander.error()` with `exitCode` | Manual `process.exit(2)` | `program.error()` is the Commander.js-idiomatic way to emit errors with custom exit codes and lets tests override exit behavior. Prefer it over raw `process.exit()`. |
+| Hand-crafted JSON | `fast-json-stringify` | The output is ~20 fields. `JSON.stringify` is sufficient. Schema-based serializers add complexity for zero measurable gain at this scale. |
+| Hand-crafted JUnit XML | `junit-xml@0.3.1` | Tiny npm package with low adoption. The XML format is trivial (3 element types). Owning 50 lines of XML generation avoids a supply chain dependency for a fixed format. |
+| Hand-crafted JUnit XML | `junit-report-builder@5.x` | `writeTo(file)` API assumes file output. We need stdout for piping. API is more complex than needed. |
+| Hand-crafted JUnit XML | `xmlbuilder2@3.x` | Full DOM-style XML builder. Massive overkill for a fixed 3-element XML format that never changes. |
+| Biome | ESLint + Prettier | 5+ packages vs 1. 2-3 config files vs 1. Seconds vs milliseconds in CI. ESM resolution issues with Bun. Biome is the modern standard for TypeScript projects. |
+| Biome | `dprint` | dprint is formatter-only (no linting). Would still need ESLint for lint rules. Biome provides both in one tool. |
+| Hand-crafted env interpolation | `yaml-env-defaults` | Wraps `js-yaml`, not Bun's built-in `YAML.parse`. Would force a parser switch. The interpolation is 20 lines of regex. |
+| Hand-crafted env interpolation | `dotenv-expand` | For `.env` files, not YAML content. Wrong tool for the job. |
+| `oven-sh/setup-bun@v2` | Manual Bun install in CI | The official action handles caching, version pinning, and PATH setup. No reason to hand-roll this. |
 
 ---
 
@@ -207,39 +430,76 @@ That's it. All other v0.2 features use existing dependencies or Bun built-ins.
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `minimatch` | Has active ReDoS CVEs in 2026 (CVE-2026-26996, CVE-2026-27903, CVE-2026-27904). Slower (630K ops/sec) than picomatch (4.4M ops/sec). | `picomatch@^4.0.3` |
-| `axios` / `got` for preflight check | These are HTTP client libraries. The preflight check is a single `fetch()` call with a timeout — Bun handles this natively. Adding an HTTP client for this is over-engineering. | `fetch()` with `AbortSignal.timeout()` |
-| `glob` package | Designed for file system glob matching, not string matching. Overkill for matching test names against a CLI pattern. | `picomatch.isMatch()` |
-| `dotenv` for env var loading | Bun 1.1.5+ loads `.env` automatically. No `dotenv` needed. | Bun built-in |
+| ESLint + Prettier for new project setup | 5+ packages, conflicting configs, slow, ESM resolution issues with Bun, complex plugin ecosystem | `@biomejs/biome` -- single binary, single config |
+| `xmlbuilder2` or any XML library for JUnit output | The JUnit XML format has 3 element types. A full XML library is a dependency for 50 lines of string concatenation. | Hand-craft XML with a `escapeXml()` helper |
+| `fast-xml-parser` for JUnit generation | Parser, not generator. Wrong direction. Even if it generates XML, it is designed for round-tripping complex documents. | Hand-craft XML |
+| `js-yaml` as a replacement parser | Bun ships `YAML.parse()` built-in. Adding `js-yaml` duplicates functionality and adds a dependency. | `YAML.parse()` (Bun built-in) via `import { YAML } from "bun"` |
+| `envsubst` CLI for interpolation | Shell tool, not a programmatic API. Cannot provide good error messages or default value support. | Regex-based `interpolateEnvVars()` function |
+| `handlebars` / `ejs` / `mustache` for config interpolation | Template engines for HTML. Massive overkill for `${VAR}` substitution. Introduce XSS-style escaping concerns irrelevant to YAML. | Simple regex replacement |
+| Separate lint and format CI steps | `biome ci` runs both in a single pass. Splitting into `biome lint` + `biome format` doubles the work. | `biome ci src/` -- single command |
 
 ---
 
 ## Version Compatibility
 
-| Package A | Compatible With | Notes |
-|-----------|-----------------|-------|
-| `picomatch@4.0.3` | Bun 1.2+ | Pure JS, zero deps, ESM — works natively in Bun. |
-| `@types/picomatch@4.0.2` | `picomatch@4.x` | Types updated July 2025 for picomatch 4.x API. |
-| `commander@14.x` | Bun 1.2+ | Pure JS/TS, no native deps. Confirmed compatible. |
-| `nanospinner@1.2.2` | Bun 1.2+ | Already shipping in v1.0, confirmed working. |
-| `ai@6.x` | `@ai-sdk/mcp@1.x` | Both part of AI SDK v6 release train. Upgrade together. |
-| `zod@4.x` | `ai@6.x` | AI SDK 6 supports Zod 4's Standard JSON Schema interface. |
+| Package | Compatible With | Notes |
+|---------|-----------------|-------|
+| `@biomejs/biome@2.4.6` | Bun >=1.2.0 | Biome ships as a platform-specific binary via npm. Works on all platforms Bun supports (macOS, Linux, Windows). No Node.js dependency. |
+| `@biomejs/biome@2.4.6` | TypeScript 5.x | Biome v2 has its own TypeScript type inference engine. Does not require or conflict with the project's TypeScript compiler. |
+| `oven-sh/setup-bun@v2` | Bun 1.2+ | Supports `bun-version` input or auto-detection from `package.json` engines field. |
+| `mikepenz/action-junit-report@v6` | GitHub Actions runner ubuntu-latest | Requires `checks: write` permission. Works with standard JUnit XML format. |
+| Commander.js `--output <format>` | Existing CLI structure | New `.option('--output <format>', ...)` works alongside existing options. Commander handles mutual exclusivity if needed via `.choices()`. |
+
+---
+
+## CLI Integration Summary
+
+The `--output` flag is the primary new CLI surface:
+
+```typescript
+program
+  .option('--output <format>', 'Output format: console (default), json, junit', 'console')
+```
+
+**Reporter selection logic:**
+
+```typescript
+function createReporter(format: string, verbose: boolean): Reporter {
+  switch (format) {
+    case 'json':
+      return new JsonReporter();
+    case 'junit':
+      return new JUnitReporter();
+    case 'console':
+    default:
+      return new ConsoleReporter(verbose);
+  }
+}
+```
+
+**Stdout/stderr contract:**
+- `console` format: all output to stderr (existing behavior, unchanged)
+- `json` format: structured JSON to stdout on completion; diagnostic output to stderr if `--verbose`
+- `junit` format: JUnit XML to stdout on completion; diagnostic output to stderr if `--verbose`
+
+This preserves the existing convention that stderr is for humans and stdout is for machines. The foundation for this was already laid in v0.2 with the `writeStderr()` helper.
 
 ---
 
 ## Sources
 
-- [picomatch npm](https://www.npmjs.com/package/picomatch) — version 4.0.3 confirmed, zero dependencies, no bundled types
-- [@types/picomatch npm](https://www.npmjs.com/package/@types/picomatch) — version 4.0.2, last updated July 2025
-- [picomatch GitHub README](https://github.com/micromatch/picomatch) — `isMatch()` API, performance benchmarks
-- [minimatch CVE-2026-26996](https://github.com/advisories/GHSA-3ppc-4f35-3m26) — ReDoS via repeated wildcards confirmed active
-- [minimatch npm issues](https://github.com/npm/cli/issues/9037) — CVE-2026-27903, CVE-2026-27904 in minimatch 10.2.2
-- [micromatch npm](https://www.npmjs.com/package/micromatch) — version 4.0.8, wraps picomatch, heavier than needed
-- [nanospinner GitHub](https://github.com/usmanyunusov/nanospinner) — `.update({ text })` API confirmed for dynamic text updates, v1.2.2
-- [Commander.js GitHub](https://github.com/tj/commander.js) — `program.error(msg, { exitCode })` API, negatable `--no-` options, string argument `<pattern>` syntax
-- [Bun fetch docs](https://bun.com/docs/runtime/networking/fetch) — `AbortSignal.timeout()` support confirmed, HEAD request pattern
+- [testmoapp/junitxml](https://github.com/testmoapp/junitxml) -- JUnit XML format specification, element/attribute reference (HIGH confidence)
+- [Biome v2 announcement](https://biomejs.dev/blog/biome-v2/) -- v2 features, type-aware linting, monorepo support (HIGH confidence)
+- [Biome changelog](https://biomejs.dev/internals/changelog/version/2-0-2...latest/) -- latest version 2.4.6 confirmed (HIGH confidence)
+- [Biome CLI reference](https://biomejs.dev/reference/cli/) -- `biome ci` command, `--reporter` flag, `--changed` flag (HIGH confidence)
+- [Biome getting started](https://biomejs.dev/guides/getting-started/) -- init command, recommended scripts (HIGH confidence)
+- [oven-sh/setup-bun](https://github.com/oven-sh/setup-bun) -- v2, verified GitHub Action (HIGH confidence)
+- [mikepenz/action-junit-report](https://github.com/mikepenz/action-junit-report) -- v6, JUnit XML to PR annotations (HIGH confidence)
+- [Docker Compose interpolation](https://docs.docker.com/reference/compose-file/interpolation/) -- `${VAR:-default}`, `${VAR:?error}` syntax reference (HIGH confidence)
+- [junit-xml npm](https://www.npmjs.com/package/junit-xml) -- v0.3.1, considered and rejected (MEDIUM confidence)
+- [junit-report-builder npm](https://www.npmjs.com/package/junit-report-builder) -- v5.x, considered and rejected (MEDIUM confidence)
 
 ---
 
-*Stack research for: SuperGhost v0.2 — DX Polish + Reliability Hardening*
-*Researched: 2026-03-11*
+*Stack research for: SuperGhost v0.3 -- CI/CD + Team Readiness*
+*Researched: 2026-03-12*

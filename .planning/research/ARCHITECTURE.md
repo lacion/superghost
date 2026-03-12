@@ -1,667 +1,663 @@
-# Architecture Research
+# Architecture Research: v0.3 CI/CD + Team Readiness
 
-**Domain:** AI-powered E2E browser testing CLI tool — v0.2 DX feature integration
-**Researched:** 2026-03-11
-**Confidence:** HIGH — based on direct source inspection of the shipped v1.0 codebase
+**Domain:** CLI test tool -- structured output formats, linting/formatting, PR workflow gates, env var interpolation
+**Researched:** 2026-03-12
+**Confidence:** HIGH
 
----
-
-## Context: What This Document Covers
-
-This is a v0.2 integration architecture document. It focuses exclusively on how the five new features thread through the existing v1.0 architecture. The v1.0 architecture document (written 2026-03-10) covers the baseline system design. This document answers:
-
-- Where does each new flag/feature attach to the existing execution flow?
-- What is new code vs. modified existing code?
-- What are the data flow changes?
-- What build order respects dependencies between the new features?
+This document focuses exclusively on the architectural changes needed for v0.3 features. It maps each feature to integration points in the existing codebase, identifies new components vs. modifications, and recommends a build order.
 
 ---
 
-## Existing Architecture: Execution Flow Summary
-
-Before mapping integration points, here is the current end-to-end call chain that the new features must thread through:
+## Current Architecture (Baseline)
 
 ```
-cli.ts
+CLI (Commander.js, src/cli.ts)
   |
-  ├── loadConfig(options.config)              // config/loader.ts
-  ├── new ConsoleReporter()                   // output/reporter.ts
-  ├── inferProvider() + validateApiKey()      // agent/model-factory.ts
-  ├── createModel()                           // agent/model-factory.ts
-  ├── new McpManager(...).initialize()        // agent/mcp-manager.ts
-  ├── new CacheManager(config.cacheDir)       // cache/cache-manager.ts
-  ├── new StepReplayer(toolExecutor)          // cache/step-replayer.ts
-  ├── new TestExecutor({...})                 // runner/test-executor.ts
-  ├── new TestRunner(config, reporter, fn)    // runner/test-runner.ts
-  └── runner.run() → RunResult
-        |
-        └── for each test:
-              TestExecutor.execute(testCase, baseUrl, testContext)
-                |
-                ├── CacheManager.load(testCase, baseUrl)
-                │     → hit: StepReplayer.replay(steps) → TestResult
-                │     → miss: executeAgent({model, tools, testCase, ...})
-                │               |
-                │               └── generateText({model, tools, system, prompt, stopWhen, output})
-                │                     → CacheManager.save(testCase, baseUrl, steps, diag)
-                │                     → TestResult
-                └── Reporter.onTestComplete(result)
+  +--> loadConfig() -------> YAML parse --> Zod validate --> Config
+  |
+  +--> ConsoleReporter (implements Reporter interface)
+  |
+  +--> TestRunner (orchestrates sequential execution)
+  |       |
+  |       +--> executeFn() --> TestExecutor (cache-first-then-AI strategy)
+  |       |                      |
+  |       |                      +--> CacheManager.load() / StepReplayer.replay()
+  |       |                      +--> executeAgent() --> AI agent via Vercel AI SDK
+  |       |
+  |       +--> reporter.onTestStart(testName)
+  |       +--> reporter.onTestComplete(TestResult)
+  |       +--> reporter.onRunComplete(RunResult)
+  |
+  +--> process.exit(code)  // 0=pass, 1=fail, 2=config error
 ```
 
-Exit code: `result.failed > 0 ? 1 : 0` (only two codes today).
+**Key architectural invariants:**
+- All human-readable output goes to stderr via `writeStderr()`
+- stdout is explicitly reserved for structured output (currently unused)
+- Reporter interface: `onTestStart`, `onTestComplete`, `onRunComplete`, `onStepProgress?`
+- RunResult contains: `results: TestResult[]`, `passed`, `failed`, `cached`, `skipped`, `totalDurationMs`
+- TestResult contains: `testName`, `testCase`, `status`, `source`, `durationMs`, `error?`, `selfHealed?`
 
 ---
 
-## Feature Integration Map
+## Feature 1: JSON Output (`--output json`)
 
-### Feature 1: `--only <pattern>` Flag
+### Integration Point
 
-**Where it attaches:** `cli.ts` → `config.tests` filtering → `TestRunner`
+**Where it touches:** CLI option parsing, Reporter dispatch, new formatter, stdout write at end of run.
 
-**Mechanism:** Filter `config.tests` after `loadConfig()`, before constructing `TestRunner`. No changes needed inside `TestRunner`, `TestExecutor`, or any other module.
+**What exists:** The stdout channel is already reserved. The RunResult/TestResult types already carry all the data needed for JSON output. The Reporter interface already has `onRunComplete(RunResult)`.
 
-**New vs. Modified:**
-- `cli.ts` — modified: add `.option("--only <pattern>", ...)` to Commander definition; after loadConfig, apply `config.tests = config.tests.filter(t => t.name.includes(options.only) || t.case.includes(options.only))` (or glob/regex match per spec)
+### New Component: `src/output/json-formatter.ts`
 
-**Data flow change:**
-```
-cli.ts:
-  loadConfig(path) → Config
-  if (options.only):
-    config.tests = config.tests.filter(matchesPattern(options.only))
-  → TestRunner(config, ...)
-```
+**Purpose:** Transform a RunResult into a structured JSON object and write it to stdout.
 
-**No changes required in:** `TestRunner`, `TestExecutor`, `CacheManager`, `AgentRunner`, `Reporter`
+**Not a Reporter implementation.** The JSON output should be written once at the end, after the run completes. The ConsoleReporter should still run (writing progress to stderr) while the JSON formatter writes the final result to stdout. This avoids duplicating the Reporter interface for something that is fundamentally a single write-at-end operation.
 
-**Edge case:** If the filtered list is empty, exit 0 with a message (not exit 2 — empty `--only` match is a valid user action, not a runtime error).
-
----
-
-### Feature 2: `--no-cache` Flag
-
-**Where it attaches:** `cli.ts` → `TestExecutor` constructor
-
-**Mechanism:** Pass a `noCache` boolean into `TestExecutor`. When true, skip `CacheManager.load()` (force AI path). Whether to also skip `CacheManager.save()` on success is a design choice — the safest default is to still write the cache (the flag means "don't read stale cache", not "produce no cache"). Document this behavior explicitly.
-
-**New vs. Modified:**
-- `cli.ts` — modified: add `.option("--no-cache", ...)` to Commander; pass `noCache: !!options.noCache` into `TestExecutor` constructor options
-- `runner/test-executor.ts` — modified: add `noCache?: boolean` to constructor options; in `execute()`, guard `CacheManager.load()` with `if (!this.noCache)`
-
-**Data flow change:**
-```
-TestExecutor.execute(testCase, baseUrl):
-  if (!this.noCache):
-    cached = CacheManager.load(...)
-    if (cached && replay.success): return cache result
-  // Always fall through to AI when --no-cache
-  return this.executeWithAgent(...)
-```
-
-**No changes required in:** `TestRunner`, `CacheManager`, `AgentRunner`, `Reporter`, `cli.ts` wiring beyond options pass-through
-
----
-
-### Feature 3: `--dry-run` Flag
-
-**Where it attaches:** `cli.ts` → skip MCP initialization → `TestRunner` receives a stub `executeFn`
-
-**Mechanism:** Dry-run must skip MCP server spawning (no `mcpManager.initialize()`) and skip AI execution. The cleanest integration is to short-circuit the `executeFn` passed to `TestRunner` — return a synthetic `TestResult` for every test without touching `TestExecutor`. This means dry-run does NOT require changes to `TestExecutor`, `CacheManager`, or `AgentRunner`.
-
-**New vs. Modified:**
-- `cli.ts` — modified: add `.option("--dry-run", ...)` to Commander; add a branch:
-  ```
-  if (options.dryRun):
-    // Skip McpManager init, skip TestExecutor construction
-    const dryRunFn: ExecuteFn = (testCase, baseUrl) => Promise.resolve({
-      testName: testCase, testCase, status: "passed",
-      source: "dry-run", durationMs: 0
-    })
-    const runner = new TestRunner(config, reporter, dryRunFn)
-    const result = await runner.run()
-    process.exit(0)
-  ```
-- `runner/types.ts` — modified: extend `TestSource` type to include `"dry-run"` (or use a separate `dryRun?: boolean` flag on `TestResult`)
-- `output/reporter.ts` — modified: add handling for `source === "dry-run"` in `onTestComplete` display
-
-**Data flow change:**
-```
-cli.ts:
-  if (options.dryRun):
-    skip McpManager.initialize()
-    skip CacheManager construction
-    skip TestExecutor construction
-    stub executeFn → synthetic TestResults
-    reporter shows "dry-run" source label
-    exit 0
-```
-
-**No changes required in:** `TestRunner` (it accepts any `executeFn`), `TestExecutor`, `CacheManager`, `AgentRunner`, `McpManager`
-
-**Why this approach:** `TestRunner` already accepts `executeFn` via injection. Dry-run is just a different function at the same injection site — no new abstraction layer needed.
-
----
-
-### Feature 4: `--verbose` Flag
-
-**Where it attaches:** `cli.ts` → `Reporter` variant + `executeAgent` `onStepFinish` callback
-
-**Mechanism:** Verbose mode has two output surfaces:
-1. **Reporter-level verbose:** Show more detail in `onTestComplete` (step count, AI message, cache metadata). Controlled by passing a `verbose` flag to `ConsoleReporter`.
-2. **Agent step-level verbose:** Print each MCP tool call in real time as the AI executes. Controlled by passing an `onStepFinish` callback into `executeAgent`.
-
-The Vercel AI SDK's `generateText` supports `onStepFinish` (callback invoked after each tool step). This is the correct hook for real-time step progress — it is invoked synchronously between tool calls, before the final response.
-
-**New vs. Modified:**
-- `cli.ts` — modified: add `.option("--verbose", ...)` to Commander; pass `verbose` to `ConsoleReporter` constructor; pass `onStepFinish` handler into `TestExecutor` (or directly into `executeAgent` config)
-- `output/reporter.ts` — modified: add `verbose?: boolean` constructor option; in `onTestComplete`, when verbose, print step count and AI message
-- `agent/agent-runner.ts` — modified: accept optional `onStepFinish?: (step: StepInfo) => void` in the config parameter; pass it into `generateText`
-- `runner/test-executor.ts` — modified: thread `onStepFinish` through `executeAgentFn` config if provided
-
-**Data flow change (verbose step progress):**
-```
-executeAgent({..., onStepFinish}):
-  generateText({
-    ...,
-    onStepFinish: (step) => {
-      if (onStepFinish && step.toolCalls):
-        for each toolCall in step.toolCalls:
-          onStepFinish({ toolName: toolCall.toolName, toolInput: toolCall.input })
-    }
-  })
-```
-
-**Output format for verbose step progress:**
-```
-  [step 1] browser_navigate { url: "https://example.com" }
-  [step 2] browser_snapshot {}
-  [step 3] browser_click { selector: "button[type=submit]" }
-```
-
-**No changes required in:** `TestRunner`, `CacheManager`, `StepRecorder`, `StepReplayer`
-
-**Note:** `onStepFinish` in Vercel AI SDK is a function callback on the `generateText` options object. It fires after each agent step (one step = one round of tool calls). This is HIGH confidence from Vercel AI SDK docs — the parameter exists and behaves as described.
-
----
-
-### Feature 5: Preflight `baseUrl` Reachability Check
-
-**Where it attaches:** `cli.ts` — between `loadConfig()` and `mcpManager.initialize()`, or inside `TestRunner.run()` before the test loop
-
-**Mechanism:** Issue an HTTP HEAD (or GET) request to the `baseUrl` and verify the response is reachable (status < 500, or simply that the connection doesn't time out). Failure should exit with code 2 (config/runtime error), not code 1 (test failure).
-
-**Two viable attachment points:**
-
-Option A — in `cli.ts`, before MCP init:
-```
-config = await loadConfig(options.config)
-if (config.baseUrl):
-  await checkReachability(config.baseUrl)  // throws PreflightError on failure
-mcpManager.initialize()
-```
-
-Option B — in `TestRunner.run()`, at the start of the loop:
-```
-async run():
-  if (this.config.baseUrl):
-    await this.preflightCheck(this.config.baseUrl)
-  for each test: ...
-```
-
-**Recommended: Option A (in `cli.ts`)** because:
-- Preflight is a startup concern, not a per-test concern
-- Failure should produce exit code 2 before any MCP processes are spawned
-- Keeps `TestRunner` focused on test iteration, not infrastructure checks
-- Consistent with where `validateApiKey` already lives (startup, before test execution)
-
-**New code:**
-- `infra/preflight.ts` — new file: `async function checkBaseUrl(url: string): Promise<void>` — fetch with a short timeout (5s), throw `PreflightError` if unreachable
-- `cli.ts` — modified: call `checkBaseUrl(config.baseUrl)` in the try block, before MCP init; catch `PreflightError` in the catch block alongside `ConfigLoadError`, exiting with code 2
-
-**Data flow change:**
-```
-cli.ts (try block):
-  config = await loadConfig(options.config)
-  if (config.baseUrl):
-    await checkBaseUrl(config.baseUrl)   // NEW — exits 2 on failure
-  validateApiKey(provider)
-  mcpManager.initialize()
-  ...
-
-cli.ts (catch block):
-  if (error instanceof PreflightError):
-    stderr("Cannot reach baseUrl: ...")
-    process.exit(2)                      // NEW exit code
-```
-
-**No changes required in:** `TestRunner`, `TestExecutor`, `CacheManager`, `AgentRunner`
-
-**Implementation note:** Use `fetch()` with an `AbortController` timeout (Bun supports native fetch). Check for per-test `baseUrl` overrides — if individual tests have different `baseUrl` values, consider checking only the global `config.baseUrl` for the preflight (per-test URLs are checked as tests run, not at startup).
-
----
-
-### Feature 6: Real-Time Step Progress Output
-
-**Where it attaches:** `executeAgent` via Vercel AI SDK `onStepFinish` callback
-
-This is covered under `--verbose` (Feature 4) above. Real-time step progress IS the verbose step output. The two features are architecturally the same hook — `onStepFinish` in `generateText`.
-
-If the spec requires step progress in non-verbose mode too (e.g., always show step count during execution), the integration point is the same — just always attach the `onStepFinish` handler and print to stdout. The `ConsoleReporter` spinner can be updated with step-in-progress text via `spinner.update()` (nanospinner supports this).
-
-**Reporter integration for progress updates:**
-```
-// In Reporter interface (output/types.ts) — new optional method:
-onStepProgress?(toolName: string, stepNumber: number): void
-
-// In ConsoleReporter:
-onStepProgress(toolName: string, stepNumber: number): void:
-  this.spinner?.update({ text: `${testName} [step ${stepNumber}: ${toolName}]` })
-```
-
-This keeps step progress observable through the Reporter interface without coupling agent internals to console output directly.
-
----
-
-### Feature 7: Distinct Exit Codes (0 / 1 / 2)
-
-**Where it attaches:** `cli.ts` catch block
-
-**Current state:** Only two exit codes exist:
-- `0` — all tests passed
-- `1` — any test failed OR any thrown error (both use `exit(1)`)
-
-**v0.2 requirement:**
-- `0` — all tests passed
-- `1` — one or more tests failed (test failures)
-- `2` — config error, runtime error, preflight failure, missing API key
-
-**New vs. Modified:**
-- `cli.ts` — modified: change catch block to use `exit(2)` for all non-test-failure errors:
-  ```
-  catch (error):
-    if (error instanceof ConfigLoadError): exit(2)
-    if (error instanceof PreflightError): exit(2)
-    if (error.message.startsWith("Missing API key")): exit(2)
-    // Unhandled errors also exit(2) (runtime errors)
-    exit(2)
-  ```
-- The success path stays: `result.failed > 0 ? exit(1) : exit(0)`
-
-**No new types or modules required** — this is purely a change to the exit code selection logic in `cli.ts`.
-
----
-
-### Feature 8: Cache Key Normalization
-
-**Where it attaches:** `CacheManager.hashKey()` — single static method in `cache/cache-manager.ts`
-
-**Current state:**
 ```typescript
-static hashKey(testCase: string, baseUrl: string): string {
-  const input = `${testCase}|${baseUrl}`;
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(input);
-  return hasher.digest("hex").slice(0, 16);
+// src/output/json-formatter.ts
+
+export interface JsonTestResult {
+  name: string;
+  testCase: string;
+  status: "passed" | "failed";
+  source: "cache" | "ai";
+  durationMs: number;
+  error?: string;
+  selfHealed?: boolean;
+}
+
+export interface JsonRunResult {
+  version: 1;
+  timestamp: string;
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    cached: number;
+    durationMs: number;
+  };
+  tests: JsonTestResult[];
+}
+
+export function formatJson(runResult: RunResult): string {
+  // Transform RunResult -> JsonRunResult, JSON.stringify with 2-space indent
+}
+
+export function writeJsonToStdout(json: string): void {
+  Bun.write(Bun.stdout, json + "\n");
 }
 ```
 
-The hash is computed from the raw string. Any whitespace difference (leading spaces, trailing newlines, multiple spaces between words) produces a different key for semantically identical test cases.
+### Modification: `src/cli.ts`
 
-**Change required:**
+Add `--output <format>` option with choices `console` (default), `json`, `junit`. After `runner.run()` returns the RunResult, dispatch to the appropriate formatter:
+
 ```typescript
-static normalizeKey(s: string): string {
-  return s.trim().replace(/\s+/g, " ");
-}
-
-static hashKey(testCase: string, baseUrl: string): string {
-  const input = `${this.normalizeKey(testCase)}|${this.normalizeKey(baseUrl)}`;
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(input);
-  return hasher.digest("hex").slice(0, 16);
+// After runner.run() completes:
+if (options.output === "json") {
+  writeJsonToStdout(formatJson(result));
+} else if (options.output === "junit") {
+  writeJunitToStdout(formatJunit(result, config));
 }
 ```
 
-**Migration concern:** Existing cache files have keys computed without normalization. After this change, any test case that had extra whitespace will produce a new hash, missing the existing cache entry. The cache will self-heal (AI re-executes and writes a new entry with the normalized key). Old entries become orphaned files — acceptable, since the cache is a `.superghost-cache/` directory users can delete.
+### Data Flow
 
-**New vs. Modified:**
-- `cache/cache-manager.ts` — modified: add `normalizeKey()` static method; apply to both `testCase` and `baseUrl` in `hashKey()`
+```
+TestRunner.run()
+    |
+    +--> ConsoleReporter (stderr, always, progress/spinners)
+    |
+    v
+RunResult
+    |
+    +--> if --output json  --> formatJson(RunResult) --> stdout
+    +--> if --output junit --> formatJunit(RunResult) --> stdout
+    +--> if console (default) --> nothing to stdout (summary already on stderr)
+```
 
-**No changes required in:** `cli.ts`, `TestExecutor`, `StepRecorder`, `StepReplayer`, any other module (they all call `hashKey` indirectly through `CacheManager.load/save/delete`)
+### Design Decision: --output vs --reporter
+
+Use `--output` (not `--reporter`) because this controls the output format to stdout, not which Reporter implementation runs. The ConsoleReporter always runs for interactive feedback. `--output` adds a structured write to stdout at the end. This is the pattern used by Jest (`--json`), Vitest (`--reporter json`), and most CLI test tools.
 
 ---
 
-## System Overview: v0.2 Integrated Architecture
+## Feature 2: JUnit XML Output (`--output junit`)
 
+### Integration Point
+
+Same as JSON: new formatter, single write to stdout at end of run.
+
+### New Component: `src/output/junit-formatter.ts`
+
+**Purpose:** Transform a RunResult into JUnit XML format.
+
+No external XML library needed -- JUnit XML is simple enough to generate with string templates. Adding a dependency like `fast-xml-parser` or `xmlbuilder2` is overkill for generating (not parsing) a fixed-structure XML document.
+
+```typescript
+// src/output/junit-formatter.ts
+
+export function formatJunit(runResult: RunResult, suiteName?: string): string {
+  // Generate JUnit XML string manually
+}
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                            CLI Layer                                   │
-│  superghost --config tests.yaml [--dry-run] [--verbose]               │
-│             [--no-cache] [--only <pattern>]                            │
-│                                                                        │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │  cli.ts                                                        │     │
-│  │  1. loadConfig()                                               │     │
-│  │  2. filter config.tests on --only pattern           [NEW]     │     │
-│  │  3. checkBaseUrl(config.baseUrl) preflight          [NEW]     │     │
-│  │  4. validateApiKey()                                           │     │
-│  │  5. McpManager.initialize()  (skipped on --dry-run) [MOD]    │     │
-│  │  6. wire TestExecutor (noCache, onStepFinish flags) [MOD]    │     │
-│  │  7. runner.run()                                               │     │
-│  │  8. exit 0/1/2                                      [MOD]    │     │
-│  └──────────────────────────────┬───────────────────────────────┘     │
-└─────────────────────────────────┼────────────────────────────────────┘
-                                  │
-┌─────────────────────────────────▼────────────────────────────────────┐
-│                          Runner Layer                                   │
-│  ┌──────────────────┐      ┌──────────────────────────────────────┐   │
-│  │  TestRunner       │─────▶│  TestExecutor                         │   │
-│  │  (unchanged)      │      │  - noCache flag bypasses load()      │   │
-│  │                   │      │  - threads onStepFinish through      │   │
-│  │                   │      │    executeAgentFn config             │   │
-│  └──────────────────┘      └──────────────────┬───────────────────┘   │
-└─────────────────────────────────────────────────┼──────────────────────┘
-                                                  │
-               ┌──────────────────────────────────┼────────────────────┐
-               │                                  │                     │
-┌──────────────▼───────────────┐  ┌───────────────▼────────────────────┐
-│       Cache Layer             │  │          Agent Layer                │
-│  ┌─────────────────────────┐ │  │  ┌───────────────────────────────┐ │
-│  │  CacheManager           │ │  │  │  executeAgent()                │ │
-│  │  + normalizeKey()  [MOD]│ │  │  │  + onStepFinish callback [MOD]│ │
-│  │  - hashKey normalized   │ │  │  │  fires on each tool step      │ │
-│  └─────────────────────────┘ │  │  └───────────────────────────────┘ │
-│  ┌─────────────────────────┐ │  └────────────────────────────────────┘
-│  │  StepReplayer            │ │
-│  │  (unchanged)             │ │
-│  └─────────────────────────┘ │  ┌─────────────────────────────────────┐
-└──────────────────────────────┘  │       Infra Layer                    │
-                                  │  ┌───────────────────────────────┐  │
-┌──────────────────────────────┐  │  │  preflight.ts          [NEW]  │  │
-│       Output Layer            │  │  │  checkBaseUrl(url)            │  │
-│  ┌─────────────────────────┐ │  │  └───────────────────────────────┘  │
-│  │  ConsoleReporter         │ │  │  ┌───────────────────────────────┐  │
-│  │  + verbose flag    [MOD]│ │  │  │  ProcessManager (unchanged)   │  │
-│  │  + onStepProgress  [MOD]│ │  │  └───────────────────────────────┘  │
-│  └─────────────────────────┘ │  └─────────────────────────────────────┘
-└──────────────────────────────┘
+
+**Target JUnit XML structure:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="superghost" tests="4" failures="1" errors="0" skipped="0" time="12.345">
+  <testsuite name="superghost" tests="4" failures="1" errors="0" skipped="0" time="12.345" timestamp="2026-03-12T10:00:00Z">
+    <testcase name="Login Flow" classname="superghost" time="3.200">
+    </testcase>
+    <testcase name="Dashboard Load" classname="superghost" time="1.100">
+      <failure message="Element not found" type="AssertionFailure">Element not found</failure>
+    </testcase>
+    <testcase name="Checkout Process" classname="superghost" time="5.400">
+      <properties>
+        <property name="source" value="cache"/>
+      </properties>
+    </testcase>
+  </testsuite>
+</testsuites>
 ```
+
+**Key mapping decisions:**
+- `classname` = `"superghost"` (flat, no package hierarchy -- there is no concept of test classes)
+- `time` = `durationMs / 1000` (JUnit uses seconds as float)
+- Failed tests get `<failure>` with the error message
+- `source` (cache/ai) and `selfHealed` go into `<properties>` for each testcase -- useful metadata without breaking standard parsers
+- No `<error>` elements -- SuperGhost failures are always assertion-class (the AI says test failed), not unexpected exceptions
+- `timestamp` in ISO 8601 format
+
+### Modification: `src/cli.ts`
+
+Same dispatch pattern as JSON (see above).
 
 ---
 
-## Component Change Summary
+## Feature 3: Env Var Interpolation in YAML Configs
 
-### Modified Existing Files
+### Integration Point
 
-| File | Change | Reason |
-|------|--------|--------|
-| `src/cli.ts` | Add 4 new CLI options to Commander; add `--only` filter; add preflight call; add `--dry-run` branch; thread `verbose`/`noCache` flags to constructors; fix exit codes in catch | Central wiring point for all flags |
-| `src/runner/test-executor.ts` | Add `noCache?: boolean` and `onStepFinish?` to constructor options; guard `CacheManager.load()` with `noCache` check; pass `onStepFinish` into `executeAgentFn` | Owns cache-first decision + agent invocation |
-| `src/agent/agent-runner.ts` | Add `onStepFinish?` to config parameter type; pass to `generateText` call | Vercel AI SDK step hook lives here |
-| `src/cache/cache-manager.ts` | Add `normalizeKey()` static method; apply to `hashKey()` inputs | Only hash computation needs to change |
-| `src/output/reporter.ts` | Add `verbose?: boolean` to constructor; add `onStepProgress()` method; handle `"dry-run"` source in `onTestComplete` | Output formatting for new modes |
-| `src/output/types.ts` | Add `onStepProgress?(toolName: string, step: number): void` to `Reporter` interface | Keeps reporter interface consistent |
-| `src/runner/types.ts` | Add `"dry-run"` to `TestSource` union OR add `dryRun?: boolean` to `TestResult` | Needed for dry-run result labeling |
+**Where it touches:** Config loading pipeline, between YAML parse and Zod validation.
+
+**What exists:** `loadConfig()` in `src/config/loader.ts` has a clean 3-layer pipeline: file read -> YAML parse -> Zod validate. Env var interpolation slots in as a new layer between parse and validate.
+
+### New Component: `src/config/interpolate.ts`
+
+**Purpose:** Walk a parsed YAML object and replace `${VAR_NAME}` patterns with `process.env` values.
+
+```typescript
+// src/config/interpolate.ts
+
+/**
+ * Recursively walk an object and replace ${VAR_NAME} patterns
+ * in string values with process.env[VAR_NAME].
+ *
+ * Supports:
+ *   ${VAR}           - required, throws if missing
+ *   ${VAR:-default}  - optional with default value
+ *
+ * Only operates on string values. Does not modify keys or non-string values.
+ */
+export function interpolateEnvVars(obj: unknown): unknown {
+  // Regex: /\$\{([^}]+)\}/g
+  // For each match, split on :- for default support
+  // Throw ConfigLoadError if required var is missing
+}
+```
+
+### Modification: `src/config/loader.ts`
+
+Insert interpolation between YAML parse and Zod validation:
+
+```typescript
+// Current:
+raw = YAML.parse(content);
+const result = ConfigSchema.safeParse(raw);
+
+// After:
+raw = YAML.parse(content);
+raw = interpolateEnvVars(raw);  // <-- new layer
+const result = ConfigSchema.safeParse(raw);
+```
+
+**Error handling:** Missing required env vars throw `ConfigLoadError` with a clear message naming the variable and the config field path where it appeared. This preserves the existing error UX pattern.
+
+### Design Decision: No External Library
+
+The interpolation pattern `${VAR}` with optional `${VAR:-default}` is trivially implementable with a single regex and recursive walk. Libraries like `string-env-interpolation` or `yaml-env-defaults` add dependencies for 20 lines of code. The regex approach also gives full control over error messages, which matters for CLI UX.
+
+### Data Flow
+
+```
+YAML file content
+    |
+    v
+YAML.parse(content) --> raw JS object
+    |
+    v
+interpolateEnvVars(raw) --> raw JS object with env vars resolved
+    |
+    v
+ConfigSchema.safeParse(resolved) --> validated Config
+```
+
+### Scope of Interpolation
+
+Interpolation applies to **all string values** in the config, not just specific fields. This means:
+- `baseUrl: ${APP_URL}` works
+- `model: ${AI_MODEL:-claude-sonnet-4-6}` works
+- `tests[0].case: "check login at ${APP_URL}"` works
+- `timeout: ${TIMEOUT}` -- the string "5000" gets interpolated, then Zod coerces/validates the number
+
+The recursive walk handles arrays and nested objects naturally.
+
+---
+
+## Feature 4: Linting/Formatting Enforcement (Biome)
+
+### Integration Point
+
+**Where it touches:** New config file at repo root, new npm scripts, GitHub Actions workflow. No source code changes.
 
 ### New Files
 
 | File | Purpose |
 |------|---------|
-| `src/infra/preflight.ts` | `checkBaseUrl(url: string): Promise<void>` — fetch with timeout, throw `PreflightError` on failure |
+| `biome.json` | Biome configuration -- linter rules, formatter settings |
 
-### Unchanged Files
+### Modification: `package.json`
 
-| File | Reason Unchanged |
-|------|-----------------|
-| `src/runner/test-runner.ts` | Accepts injected `executeFn` — dry-run uses a different `executeFn`, no change needed |
-| `src/config/loader.ts` | Config loading is unaffected by DX flags |
-| `src/config/schema.ts` | No new config fields (all flags are CLI-only, not YAML-config) |
-| `src/cache/step-recorder.ts` | Step recording internals unchanged |
-| `src/cache/step-replayer.ts` | Replay logic unchanged |
-| `src/agent/mcp-manager.ts` | MCP lifecycle unchanged |
-| `src/agent/model-factory.ts` | Provider/model creation unchanged |
-| `src/agent/prompt.ts` | System prompt unchanged |
-| `src/infra/process-manager.ts` | Process cleanup unchanged |
-| `src/infra/signals.ts` | Signal handling unchanged |
+Add scripts:
 
----
-
-## Data Flow Changes
-
-### v0.2 CLI Startup Flow
-
-```
-User: superghost --config tests.yaml --only "login" --verbose --no-cache
-
-cli.ts:
-  1. Commander parses flags: { config, only: "login", verbose: true, noCache: true }
-  2. loadConfig(options.config) → Config                  // unchanged
-  3. config.tests = config.tests.filter(matchesOnly)      // NEW: --only filter
-  4. await checkBaseUrl(config.baseUrl)                   // NEW: preflight
-      → fetch(baseUrl, { signal: AbortSignal.timeout(5000) })
-      → throws PreflightError → catch → stderr + exit(2)
-      → resolves → continue
-  5. inferProvider(), validateApiKey()                    // unchanged
-  6. createModel()                                        // unchanged
-  7. mcpManager.initialize()                              // unchanged (skipped for --dry-run)
-  8. new CacheManager(...)                                // unchanged
-  9. new StepReplayer(...)                                // unchanged
-  10. new TestExecutor({ noCache: true, onStepFinish })   // MODIFIED: extra options
-  11. new ConsoleReporter({ verbose: true })              // MODIFIED: extra option
-  12. new TestRunner(config, reporter, executeFn)         // unchanged
-  13. runner.run()
-  14. exit(result.failed > 0 ? 1 : 0)
-  catch ConfigLoadError → exit(2)                        // MODIFIED: was exit(1)
-  catch PreflightError  → exit(2)                        // NEW
-  catch "Missing API key" → exit(2)                      // MODIFIED: was exit(1)
-  catch unknown → exit(2)                                // MODIFIED: was throw
+```json
+{
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  }
+}
 ```
 
-### v0.2 Verbose Agent Execution Flow
+Add dev dependency:
 
+```json
+{
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.0"
+  }
+}
 ```
-TestExecutor.executeWithAgent(testCase, baseUrl, ...):
-  executeAgentFn({
-    ...,
-    onStepFinish: (step) => reporter.onStepProgress(toolName, stepNum)  // NEW
-  })
 
-executeAgent(config):
-  recorder = new StepRecorder()
-  generateText({
-    model, tools: wrappedTools, system, prompt, stopWhen, output,
-    onStepFinish: (step) => {                                           // NEW
-      for toolCall in step.toolCalls:
-        config.onStepFinish?.({ toolName, stepNum })
+### Biome Configuration Strategy
+
+```json
+{
+  "$schema": "https://biomejs.dev/schemas/2.3.0/schema.json",
+  "organizeImports": { "enabled": true },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
     }
-  })
-
-ConsoleReporter.onStepProgress(toolName, stepNum):
-  this.spinner?.update({ text: `${testName} [step ${stepNum}: ${toolName}]` })
+  },
+  "files": {
+    "ignore": ["node_modules", "dist", ".superghost-cache"]
+  }
+}
 ```
 
-### v0.2 Cache Key Normalization Flow
+### Why Biome Over ESLint + Prettier
 
-```
-Before (v1.0):
-  hashKey("  Log in to the app  ", "https://example.com")
-  input = "  Log in to the app  |https://example.com"
-  hash → "a1b2c3d4e5f60000"
+- **Single tool** for both linting and formatting (no config sync issues)
+- **Fast** -- written in Rust, runs in <100ms on a 3,787 LOC codebase
+- **Bun-native compatible** -- installs via `bun add`, no Node.js-specific tooling
+- **Zero-config viable** -- recommended rules work out of the box
+- **Active development** -- v2.3 as of early 2026, strong TypeScript inference since v2.0
+- **No dependency conflicts** -- ESLint's plugin ecosystem has frequent breaking changes
 
-After (v0.2):
-  hashKey("  Log in to the app  ", "https://example.com")
-  normalized = "Log in to the app|https://example.com"
-  hash → "f9e8d7c6b5a40000"  ← different hash, consistent across whitespace variants
-```
+### Source Code Impact
+
+Biome adoption may require reformatting existing files to match the configured style. This is a one-time `biome check --write .` pass. The PR should apply formatting fixes in a single commit before any feature work.
 
 ---
 
-## Build Order
+## Feature 5: PR Workflow with Test Gates (GitHub Actions)
 
-Dependencies between v0.2 features determine the correct implementation sequence:
+### Integration Point
 
-**Phase 1 — No dependencies (build first, enables everything else):**
+**Where it touches:** New GitHub Actions workflow file, branch protection rules.
 
-1. **Cache key normalization** (`cache/cache-manager.ts`)
-   - Isolated static method change. No dependents need to change.
-   - Can be shipped and tested independently with unit tests.
+### New File: `.github/workflows/ci.yml`
 
-2. **Exit code fix** (`cli.ts` catch block only)
-   - Mechanical change. No new types, no new modules.
-   - Unblocks all features that need exit code 2 on failure.
+```yaml
+name: CI
 
-**Phase 2 — New infrastructure (no inter-feature dependencies):**
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
 
-3. **`infra/preflight.ts`** — new module, tested in isolation
-4. **Preflight wiring in `cli.ts`** — requires `preflight.ts` from step 3
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run lint
 
-**Phase 3 — Flag threading (each flag is independent):**
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run typecheck
 
-5. **`--only <pattern>`** — `cli.ts` only, no downstream changes
-   - Depends only on `loadConfig()` result being available (always true)
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun test
+```
 
-6. **`--no-cache`** — `cli.ts` + `TestExecutor` constructor option
-   - Simple boolean passthrough; no new types needed
+### Design Decisions
 
-7. **`--dry-run`** — `cli.ts` branch + `runner/types.ts` + `output/reporter.ts`
-   - Requires `TestSource` type extension before reporter changes
+**Three separate jobs, not one.** Running lint, typecheck, and test as separate jobs enables:
+- Parallel execution (faster feedback)
+- Granular status checks in GitHub PR UI (see exactly what failed)
+- Independent retries (flaky test does not re-run lint)
 
-**Phase 4 — Verbose / step progress (most complex, depends on Phase 3):**
+**No E2E in PR checks.** The existing `e2e.yml` runs on schedule/dispatch because E2E tests require AI API keys and are slow/non-deterministic. PR checks should be fast, deterministic, and free.
 
-8. **`output/types.ts`** — add `onStepProgress?` to `Reporter` interface
-9. **`output/reporter.ts`** — implement `onStepProgress`, add `verbose` constructor option
-10. **`agent/agent-runner.ts`** — add `onStepFinish?` to config, wire into `generateText`
-11. **`runner/test-executor.ts`** — thread `onStepFinish` from constructor through `executeAgentFn`
-12. **`cli.ts` verbose wiring** — pass `verbose`/`onStepFinish` to reporter and executor
+**Branch protection rules** (manual setup, not automated):
+- Require status checks: `lint`, `typecheck`, `test`
+- Require branch to be up to date before merging
+- Require PR reviews (optional, depends on team size)
 
-**Summary build order table:**
+### Relationship to Existing Workflows
 
-| Step | File | Feature | Depends On |
-|------|------|---------|-----------|
-| 1 | `cache/cache-manager.ts` | Cache normalization | nothing |
-| 2 | `cli.ts` catch block | Exit codes 0/1/2 | nothing |
-| 3 | `src/infra/preflight.ts` | Preflight (new file) | nothing |
-| 4 | `cli.ts` preflight call | Preflight wiring | step 3 |
-| 5 | `cli.ts` option + filter | `--only` flag | nothing |
-| 6 | `cli.ts` + `test-executor.ts` | `--no-cache` flag | nothing |
-| 7 | `runner/types.ts` | TestSource `"dry-run"` | nothing |
-| 8 | `cli.ts` + `reporter.ts` | `--dry-run` flag | step 7 |
-| 9 | `output/types.ts` | Reporter interface | nothing |
-| 10 | `output/reporter.ts` | Verbose reporter | step 9 |
-| 11 | `agent/agent-runner.ts` | `onStepFinish` hook | nothing |
-| 12 | `runner/test-executor.ts` | Thread `onStepFinish` | step 11 |
-| 13 | `cli.ts` verbose wiring | `--verbose` flag | steps 10, 12 |
+| Workflow | Trigger | Purpose | Change |
+|----------|---------|---------|--------|
+| `ci.yml` | PR/push to main | Fast deterministic gates | **NEW** |
+| `e2e.yml` | Weekly schedule, manual dispatch | AI-dependent E2E validation | No change |
+| `release.yml` | Tag push | Build + publish | Add `bun run lint` step |
 
 ---
 
-## Architectural Patterns for v0.2
+## Feature 6: Contributor Docs
 
-### Pattern: Flag Options Object Instead of Individual Parameters
+### Integration Point
 
-As new flags accumulate, passing them individually into constructors becomes unwieldy. `TestExecutor` will need `noCache` and `onStepFinish`; `ConsoleReporter` needs `verbose`. Use an options object from the start:
+**Where it touches:** New markdown files at repo root and `.github/` directory. No source code changes.
 
-```typescript
-// Before (v1.0):
-new TestExecutor({ cacheManager, replayer, executeAgentFn, model, tools, config, globalContext })
+### New Files
 
-// After (v0.2) — extend the existing options object:
-new TestExecutor({
-  cacheManager, replayer, executeAgentFn, model, tools, config, globalContext,
-  noCache?: boolean,
-  onStepFinish?: (toolName: string, stepNumber: number) => void,
-})
-```
+| File | Purpose |
+|------|---------|
+| `CONTRIBUTING.md` | How to set up dev environment, run tests, submit PRs |
+| `SECURITY.md` | How to report security vulnerabilities |
+| `.github/ISSUE_TEMPLATE/bug_report.md` | Structured bug report template |
+| `.github/ISSUE_TEMPLATE/feature_request.md` | Feature request template |
+| `.github/PULL_REQUEST_TEMPLATE.md` | PR description template with checklist |
 
-This avoids breaking changes to the constructor signature — all new options are optional with sensible defaults.
+### No Architectural Impact
 
-### Pattern: Runtime Options Separate from Config Schema
+These are documentation-only changes. They reference existing commands (`bun test`, `bun run lint`, `bun run typecheck`) and the CI workflow.
 
-None of the new flags (`--dry-run`, `--verbose`, `--no-cache`, `--only`) belong in `config/schema.ts` (the YAML config). They are invocation-time options, not project-level configuration. Keep them CLI-only:
+---
 
-- `config/schema.ts` — unchanged
-- `cli.ts` Commander options — where flags live
-- Passed as constructor options into downstream modules
+## Component Map: New vs. Modified
 
-This means existing YAML config files are fully backward compatible with v0.2.
+### New Components
 
-### Pattern: Thin `cli.ts` as Feature Aggregation Point
+| Component | Path | Purpose | Depends On |
+|-----------|------|---------|------------|
+| JSON Formatter | `src/output/json-formatter.ts` | Transform RunResult to JSON string | `RunResult` type |
+| JUnit Formatter | `src/output/junit-formatter.ts` | Transform RunResult to JUnit XML string | `RunResult` type |
+| Env Interpolator | `src/config/interpolate.ts` | Replace `${VAR}` patterns in parsed config | `process.env` |
+| Biome Config | `biome.json` | Linter/formatter configuration | None |
+| CI Workflow | `.github/workflows/ci.yml` | PR quality gates | Biome, bun test |
+| Contributor Docs | `CONTRIBUTING.md`, etc. | Onboarding documentation | CI workflow |
 
-All five features touch `cli.ts`, but the actual logic lives in the modules closest to the concern:
-- `--only` filtering: 3 lines in `cli.ts` (the filter itself is trivial)
-- `--no-cache`: 1 option to Commander + 1 field in constructor call
-- `--dry-run`: 8-10 lines in `cli.ts` (the entire branch)
-- Preflight: delegated to `infra/preflight.ts`
-- Exit codes: logic moved to explicit `instanceof` checks in catch
+### Modified Components
 
-`cli.ts` remains a wiring file, not a logic file. New features add wiring, not business rules.
+| Component | Path | Change | Risk |
+|-----------|------|--------|------|
+| CLI | `src/cli.ts` | Add `--output <format>` option, dispatch to formatters | LOW -- additive option |
+| Config Loader | `src/config/loader.ts` | Insert `interpolateEnvVars()` call between parse and validate | LOW -- single insertion point |
+| package.json | `package.json` | Add Biome dev dep, lint/format scripts | LOW -- dev tooling only |
+| release.yml | `.github/workflows/release.yml` | Add lint step | LOW -- additive |
+
+### Unchanged Components
+
+| Component | Why Unchanged |
+|-----------|---------------|
+| TestRunner | Does not know about output format -- only calls Reporter |
+| TestExecutor | Execution logic is format-agnostic |
+| ConsoleReporter | Still runs for stderr progress; new formatters are separate |
+| Reporter interface | JSON/JUnit are not Reporters -- they transform RunResult at end |
+| CacheManager | Cache behavior is independent of output format |
+| Agent subsystem | AI execution is independent of output format |
+| Config schema | Env vars are resolved before Zod sees the data |
+
+---
+
+## Recommended Build Order
+
+The build order is driven by dependency chains and testing value.
+
+### Phase 1: Env Var Interpolation
+
+**Why first:** Unblocks config flexibility needed for CI/CD usage. No dependency on other features. The config loader is the most foundational component -- getting this right early avoids churn.
+
+**Build steps:**
+1. Create `src/config/interpolate.ts` with `interpolateEnvVars()`
+2. Unit test: basic substitution, missing vars, defaults, nested objects, arrays
+3. Modify `src/config/loader.ts` to call interpolation between parse and validate
+4. Integration test: YAML with `${VAR}` resolved correctly
+
+**Risk:** LOW. Well-defined insertion point. Existing tests continue to pass because current configs have no `${VAR}` syntax.
+
+### Phase 2: JSON Output Format
+
+**Why second:** Simplest output format. Validates the `--output` CLI option pattern that JUnit reuses. Provides immediate CI/CD value (pipe to `jq`, consume in scripts).
+
+**Build steps:**
+1. Create `src/output/json-formatter.ts` with `formatJson()` and `writeJsonToStdout()`
+2. Add `--output <format>` option to CLI (initially just `console` and `json`)
+3. Wire: after `runner.run()`, dispatch to `formatJson` if `--output json`
+4. Unit test: verify JSON structure, field mapping from RunResult
+5. Integration test: `--output json` writes valid JSON to stdout, stderr still shows progress
+
+**Risk:** LOW. Additive change. The RunResult already contains all needed data.
+
+### Phase 3: JUnit XML Output Format
+
+**Why third:** Same pattern as JSON, reuses the `--output` dispatch. JUnit is more complex (XML generation, attribute mapping) but the architecture is identical.
+
+**Build steps:**
+1. Create `src/output/junit-formatter.ts` with `formatJunit()`
+2. Add `junit` to the `--output` choices
+3. Wire into the same dispatch in CLI
+4. Unit test: verify XML structure, escaped characters, time format
+5. Integration test: valid JUnit XML to stdout
+
+**Risk:** LOW. Same pattern as JSON. XML escaping needs care (test names with `<`, `>`, `&`, `"`).
+
+### Phase 4: Linting/Formatting (Biome)
+
+**Why fourth:** Foundational for PR gates, but does not block output format features. Should be done before creating the CI workflow so the workflow has lint/format commands to call.
+
+**Build steps:**
+1. Add `@biomejs/biome` dev dependency
+2. Create `biome.json` configuration
+3. Add lint/format npm scripts to `package.json`
+4. Run `biome check --write .` to apply formatting to existing codebase
+5. Verify all existing tests still pass after formatting
+
+**Risk:** MEDIUM. Formatting may produce a large diff touching many files. Best done as a standalone commit/PR to keep reviews clean. Must verify Biome rules do not conflict with existing code patterns (e.g., `any` types in agent code).
+
+### Phase 5: PR Workflow (GitHub Actions)
+
+**Why fifth:** Depends on Biome (needs `bun run lint`) and existing test infrastructure. Should be one of the last code changes so the workflow tests everything that came before it.
+
+**Build steps:**
+1. Create `.github/workflows/ci.yml` with lint, typecheck, test jobs
+2. Add lint step to `.github/workflows/release.yml`
+3. Test by opening a PR against the branch
+4. Configure branch protection rules (manual GitHub UI step)
+
+**Risk:** LOW. Declarative YAML config. Test by pushing the workflow and verifying checks appear.
+
+### Phase 6: Contributor Docs
+
+**Why last:** References all the tooling and workflows established in previous phases. Writing docs before the tools exist means docs become stale immediately.
+
+**Build steps:**
+1. Create `CONTRIBUTING.md` referencing dev setup, linting, testing, PR process
+2. Create `SECURITY.md`
+3. Create issue and PR templates
+4. Verify all referenced commands work
+
+**Risk:** NONE. Documentation-only, no code changes.
 
 ---
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Adding CLI Flags to YAML Config Schema
+### Anti-Pattern 1: Making JSON/JUnit into Reporter implementations
 
-**What people do:** Add `dry_run`, `verbose`, `no_cache` fields to `ConfigSchema` and `config/types.ts`.
+**What people do:** Create `JsonReporter` and `JunitReporter` that implement the `Reporter` interface, tracking state across `onTestStart`/`onTestComplete` calls.
 
-**Why it's wrong:** Run-time invocation flags do not belong in project-level configuration files. This forces users to edit their YAML for every run mode, leaks CLI concerns into the config module, and makes config files harder to share across team members with different preferences.
+**Why it is wrong:** The Reporter interface is designed for real-time progress feedback (spinners, streaming output). JSON and JUnit output is a batch transformation of the final RunResult. Making them Reporters means:
+- Duplicating aggregation logic already in `aggregateResults()`
+- Managing internal state that mirrors RunResult
+- Losing the ability to show console progress alongside structured output
 
-**Do this instead:** CLI flags stay in Commander options in `cli.ts`. Config schema stays for project-level settings (browser type, model, baseUrl, timeout, etc.).
+**Do this instead:** Keep ConsoleReporter for progress. Add formatters that transform the completed RunResult into output strings. Write to stdout once at the end.
 
-### Anti-Pattern 2: Implementing Verbose Output by Logging Inside Agent Modules
+### Anti-Pattern 2: Env var interpolation in the YAML string before parsing
 
-**What people do:** Add `console.log("[step]", toolName)` directly inside `executeAgent` or `StepRecorder.wrapTools()`.
+**What people do:** Regex-replace `${VAR}` in the raw YAML string content before calling `YAML.parse()`.
 
-**Why it's wrong:** Hard-codes output to stdout regardless of verbose flag, bypasses the `Reporter` abstraction, makes output untestable, and breaks non-TTY (CI) output modes.
+**Why it is wrong:** Env var values may contain YAML-special characters (`#`, `:`, `[`, `{`) that break YAML parsing. A value like `password: ${DB_PASS}` where `DB_PASS=foo:bar#baz` becomes `password: foo:bar#baz` which YAML interprets incorrectly.
 
-**Do this instead:** Route step progress through `Reporter.onStepProgress()`. The reporter already handles TTY detection (via picocolors + nanospinner). Verbose output is a presentation concern.
+**Do this instead:** Parse YAML first to get the JS object, then walk the object and replace `${VAR}` patterns in string values. This way YAML parsing is complete and env var values are just string content.
 
-### Anti-Pattern 3: Preflight Check Inside TestRunner
+### Anti-Pattern 3: Using a full XML library for JUnit generation
 
-**What people do:** Add `await this.checkBaseUrl()` at the top of `TestRunner.run()`.
+**What people do:** Add `fast-xml-parser`, `xmlbuilder2`, or `js2xmlparser` as a dependency to generate JUnit XML.
 
-**Why it's wrong:** Preflight failure should exit with code 2 before MCP servers are even spawned. Putting it in `TestRunner` means MCP startup already happened. Also, `TestRunner` should own test iteration, not infrastructure health checks.
+**Why it is wrong:** JUnit XML is a fixed, well-known structure. Generation (not parsing) of a 30-line XML document does not need a 50KB+ dependency. The XML escaping rules are trivial (5 characters: `<`, `>`, `&`, `"`, `'`).
 
-**Do this instead:** Preflight in `cli.ts`, before `mcpManager.initialize()`. It's a startup concern in the same category as `validateApiKey()`.
+**Do this instead:** Template-based string generation with a small `escapeXml()` helper. Keeps the dependency count low and the output fully controllable.
 
-### Anti-Pattern 4: Per-Test Preflight Checks
+### Anti-Pattern 4: Coupling env var interpolation to specific config fields
 
-**What people do:** Check reachability before every test case to handle the case where the server goes down mid-run.
+**What people do:** Only interpolate `baseUrl`, `model`, and a few known fields, hardcoding the field list.
 
-**Why it's wrong:** Adds 5s overhead per test. Mid-run failures already surface as test failures (AI agent can't navigate to baseUrl, test fails). The preflight is a startup sanity check, not a runtime health monitor.
+**Why it is wrong:** Users will want env vars in test case descriptions (`case: "login at ${APP_URL}"`), context fields, and future config additions. Hardcoding a field list means every new config field needs an interpolation update.
 
-**Do this instead:** Single preflight at startup, checking only `config.baseUrl`. Per-test `baseUrl` overrides are user-controlled and can fail as test failures.
+**Do this instead:** Recursive walk that interpolates all string values regardless of their position in the config tree. The schema validation after interpolation catches any invalid results.
 
 ---
 
-## Integration Points
+## Data Flow: Complete v0.3 Pipeline
 
-### Internal Boundaries (v0.2 Changes)
+```
+YAML config file
+    |
+    v
+Bun.file().text() -----> raw string
+    |
+    v
+YAML.parse() ----------> raw JS object
+    |
+    v
+interpolateEnvVars() ---> resolved JS object (${VAR} replaced) [NEW]
+    |
+    v
+ConfigSchema.safeParse() -> Config (validated)
+    |
+    v
+CLI option parsing ------> --output json|junit|console [NEW]
+                            --verbose, --only, --no-cache, etc.
+    |
+    v
+TestRunner.run()
+    |
+    +--> ConsoleReporter (stderr, always active)
+    |       onTestStart -> spinner
+    |       onStepProgress -> spinner update / verbose log
+    |       onTestComplete -> spinner success/error
+    |       onRunComplete -> summary box
+    |
+    v
+RunResult
+    |
+    +--> if --output json:  formatJson(RunResult) -> stdout [NEW]
+    +--> if --output junit: formatJunit(RunResult) -> stdout [NEW]
+    +--> if console: nothing to stdout (default)
+    |
+    v
+process.exit(code)
+```
 
-| Boundary | v1.0 Communication | v0.2 Change |
-|----------|-------------------|-------------|
-| `cli.ts` → `TestExecutor` | Constructor options object | Add `noCache`, `onStepFinish` fields |
-| `cli.ts` → `ConsoleReporter` | No options (simple constructor) | Add `verbose` option |
-| `cli.ts` → `TestRunner` | Injected `executeFn` | Dry-run replaces `executeFn` with stub |
-| `TestExecutor` → `executeAgent` | Config object | Add `onStepFinish?` callback field |
-| `executeAgent` → `generateText` | Direct call | Add `onStepFinish` Vercel AI SDK callback |
-| `cli.ts` → `infra/preflight.ts` | (new) | Direct function call, throws `PreflightError` |
+---
 
-### Exit Code Contract
+## Testing Strategy for New Components
 
-| Code | Condition | Where Set |
-|------|-----------|-----------|
-| `0` | All tests passed | `cli.ts` success path: `result.failed > 0 ? 1 : 0` |
-| `1` | One or more tests failed | `cli.ts` success path: `result.failed > 0 ? 1 : 0` |
-| `2` | Config error, missing API key, preflight failure, runtime error | `cli.ts` catch block |
+| Component | Unit Test Focus | Integration Test Focus |
+|-----------|-----------------|------------------------|
+| `interpolateEnvVars()` | Single var, multiple vars, missing var error, default values, nested objects, arrays, non-string passthrough | CLI with YAML containing `${VAR}`, verify resolved config |
+| `formatJson()` | Correct JSON structure, all fields mapped, edge cases (empty results, long error strings) | `--output json` produces parseable JSON on stdout |
+| `formatJunit()` | Valid XML structure, XML escaping, time format (seconds not ms), failure/properties elements | `--output junit` produces valid JUnit XML, parseable by CI tools |
+| Biome config | N/A (config file) | `bun run lint` exits 0 on clean code |
+| CI workflow | N/A (YAML config) | PR triggers checks, all three jobs pass |
+
+### Critical Integration Test
+
+The most important integration test for v0.3:
+
+```typescript
+// Verify stdout/stderr separation with --output json
+test("--output json writes JSON to stdout and progress to stderr", async () => {
+  const { stdout, stderr } = await runCli(["--config", "...", "--output", "json"]);
+  const parsed = JSON.parse(stdout);  // Must not throw
+  expect(parsed.version).toBe(1);
+  expect(parsed.tests).toBeArray();
+  expect(stderr).toContain("superghost");  // Progress still on stderr
+});
+```
 
 ---
 
 ## Sources
 
-- Vercel AI SDK `generateText` `onStepFinish` callback: https://sdk.vercel.ai/docs/ai-sdk-core/generating-text (HIGH confidence — confirmed in official docs, parameter is `onStepFinish: (step: StepResult) => void`)
-- SuperGhost v1.0 source: direct inspection of `src/` (HIGH confidence)
-- Bun `fetch` with `AbortSignal.timeout`: https://bun.sh/docs/api/fetch (HIGH confidence — Bun supports Web API `AbortSignal.timeout()`)
+- [JUnit XML format specification (testmoapp/junitxml)](https://github.com/testmoapp/junitxml) -- HIGH confidence, authoritative community spec
+- [Biome toolchain](https://biomejs.dev/) -- HIGH confidence, official documentation
+- [Biome v2.0+ TypeScript inference](https://biomejs.dev/linter/) -- HIGH confidence, official docs
+- [GitHub Actions reusable workflows](https://oneuptime.com/blog/post/2025-12-20-github-actions-reusable-workflows/view) -- MEDIUM confidence, tutorial
+- [GitHub Actions PR status checks configuration](https://oneuptime.com/blog/post/2026-01-26-status-checks-github-actions/view) -- MEDIUM confidence, tutorial
+- Existing SuperGhost source code analysis -- HIGH confidence, direct inspection
 
 ---
-
-*Architecture research for: SuperGhost v0.2 DX feature integration*
-*Researched: 2026-03-11*
+*Architecture research for: SuperGhost v0.3 CI/CD + Team Readiness*
+*Researched: 2026-03-12*

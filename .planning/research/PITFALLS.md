@@ -1,203 +1,196 @@
 # Pitfalls Research
 
-**Domain:** DX Polish + Reliability Hardening for existing AI-powered CLI testing tool (SuperGhost v0.2)
-**Researched:** 2026-03-11
+**Domain:** CI/CD + Team Readiness features for existing AI-powered CLI testing tool (SuperGhost v0.3)
+**Researched:** 2026-03-12
 **Confidence:** HIGH
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Exit Code 2 Breaks Existing CI Scripts That Treat Any Non-Zero as "Test Failed"
+### Pitfall 1: JSON Output Leaks Human-Readable Text into stdout Breaking Machine Parsing
 
 **What goes wrong:**
-The current system emits `exit 0` (all pass) or `exit 1` (any fail). Adding `exit 2` for config/runtime errors is semantically correct but is a breaking change for CI scripts that use `|| echo "tests failed"` or `if [ $? -ne 0 ]` patterns. Those scripts currently interpret `1` and `2` identically. But scripts that use `case $?` or that pass `--exit-code-from superghost` in Docker Compose, or that compare `$status -eq 1` explicitly, will silently swallow config errors that now return `2` instead of `1`.
+The existing `ConsoleReporter` writes everything to stderr via `writeStderr()`, and the `cli.ts` `printRunHeader()` function also writes to stderr. This is correct. However, when adding `--output json`, any code path that accidentally writes to `process.stdout` (or calls `console.log`) corrupts the JSON output. The most insidious case: third-party libraries (Commander.js help/version output, nanospinner on certain error paths) write to stdout by default. If a user runs `superghost --config tests.yaml --output json` and a Commander validation error fires, Commander writes its error message to stdout before the program can catch it. The JSON parser on the consuming end receives `error: missing required option\n{"results":[...]}` and fails.
 
 **Why it happens:**
-The existing exit code contract (`0` = pass, `1` = fail) is implicitly assumed by any CI wrapper the user has written. The migration pitfall is that `exit 1` currently covers both "tests failed" and "something went wrong" — because there is only one failure code. When `exit 2` is introduced for the second class, scripts that previously relied on `exit 1` for that case will silently receive a different code and may behave incorrectly (e.g., not retry, not send an alert, not write to the failure artifact).
+The current architecture correctly reserves stdout, but this is an implicit convention enforced only by `ConsoleReporter` and `writeStderr()`. There is no structural guarantee. Adding `--output json` makes the convention load-bearing: any violation that was previously invisible now breaks downstream consumers. Commander.js writes version output (`--version`) and help output (`--help`) to `process.stdout` by default. The existing `.exitOverride()` in `cli.ts` catches Commander errors but Commander may still write to stdout before the override fires.
 
 **How to avoid:**
-- Do not change what produces `exit 1`. Keep `exit 1` for test failures only. Add `exit 2` for all new error categories (config parse errors, missing API keys, preflight failures, bad `--only` pattern with zero matches).
-- The current `cli.ts` already exits `1` for `ConfigLoadError` and missing API key. Those must be migrated to `exit 2` — but this is the expected breaking change. Document it in the changelog.
-- Add a `--strict` flag if users need old behavior (`1` for everything) for backward compatibility.
-- Write a CHANGELOG entry calling out the behavior change explicitly so users who pin CI scripts know to update them.
-- In the error output written to stderr, always include the exit code that will be used: `Error (exit 2): config file not found`.
+- Create a `JsonReporter` that implements the `Reporter` interface and buffers all results in memory, emitting a single JSON blob to stdout only in `onRunComplete()`.
+- Never emit partial JSON during the run. The JSON must be one atomic write at the end.
+- Override Commander's `configureOutput()` to redirect all Commander output to stderr: `program.configureOutput({ writeOut: (str) => writeStderr(str), writeErr: (str) => writeStderr(str) })`.
+- Add an integration test that pipes `--output json` output through `JSON.parse()` and asserts validity. Run this test for both success and failure scenarios.
+- Errors during the run (config load failure, API key missing) should ALSO produce valid JSON to stdout when `--output json` is active, with a top-level `error` field, then exit with the appropriate code.
 
 **Warning signs:**
-- CI pipeline shows "success" after a config parse error (script checked `$? -eq 1` instead of `$? -ne 0`)
-- Alert not triggered because the monitoring tool only watches for `exit 1`
-- Docker Compose `--exit-code-from` propagating `2` where the downstream expects `1`
+- `superghost --output json | jq .` produces parse errors
+- CI tool reports "invalid JSON" when consuming superghost output
+- JSON output contains ANSI escape codes or spinner characters
+- Running `--output json --help` dumps help text to stdout before the JSON blob
 
-**Phase to address:** Exit code refactor (any phase that introduces the `exit 2` path) — this must be the first change implemented, before preflight or `--only`, so that every subsequent error path uses the new taxonomy from the start.
+**Phase to address:** JSON output format implementation. This must be the first output format added because JUnit XML reuses the same Reporter-based architecture.
 
 ---
 
-### Pitfall 2: `--no-cache` Flag Gets Silently Ignored Because Commander.js --no- Prefix Has Implicit Default Behavior
+### Pitfall 2: JUnit XML Missing Required `classname` Attribute Causes CI Tools to Silently Drop Results
 
 **What goes wrong:**
-Commander.js gives special treatment to flags starting with `--no-`. When you declare `.option('--no-cache', 'Bypass cache')`, Commander automatically sets `options.cache = true` as the implicit default (without you asking it to). This means `options.cache` is always `true` unless the flag is passed — but the property name is `cache`, not `noCache`. Code that checks `options.noCache` (the natural camelCase expectation) will always be `undefined`, effectively making `--no-cache` inoperative. The bug is silent: passing `--no-cache` sets `options.cache = false` correctly, but omitting it sets `options.cache = true` rather than `undefined`, which is unexpected if the code uses `if (options.noCache)` guards.
+JUnit XML has no official specification -- it originated from the JUnit ANT task and has evolved through conventions. The `classname` attribute on `<testcase>` elements is technically optional in some XSD schemas but is **required by most CI tools** (GitHub Actions, GitLab CI, Jenkins, CircleCI). Omitting `classname` causes some tools to silently skip the test case entirely (no error, just missing from the report). Others display the test case but fail to group it, putting everything under an unnamed root. The `testmoapp/junitxml` reference implementation documents this as a strongly recommended attribute.
 
 **Why it happens:**
-Commander's `--no-` prefix convention is designed for toggling features that are "on by default." For `--no-cache`, the underlying feature (caching) _is_ on by default, which makes this the appropriate pattern — but the generated property name trips up developers who expect `options.noCache`. The Commander.js issue tracker has a confirmed historical bug (pre-v3.0) where adding `--no-foo` alongside `--foo` caused `foo` to silently default to `true` even when neither flag was passed.
+SuperGhost's `TestResult` type has `testName` and `testCase` but no concept of a "class" -- it is not a Java test framework. Developers generating JUnit XML from non-Java test runners often skip `classname` because it feels like a Java-ism that does not apply. But the attribute is what CI tools use for grouping and display hierarchy. Without it, results render poorly or disappear.
 
 **How to avoid:**
-- Use `.option('--no-cache', ...)` and read `options.cache` (boolean, `true` = use cache, `false` = skip cache). Do NOT check `options.noCache`.
-- Alternatively, avoid the `--no-` prefix entirely: use `.option('--bypass-cache', ...)` and check `options.bypassCache === true`.
-- Write a unit test that invokes the CLI without `--no-cache` and asserts the cache path is taken, and invokes it with `--no-cache` and asserts the cache path is skipped.
-- Verify Commander version is >= 3.0 (the version that fixed the combined `--foo` / `--no-foo` default behavior conflict).
+- Set `classname` to the config file name (e.g., `tests.yaml`) or a configurable suite name. This groups all test cases under a meaningful label.
+- Set `<testcase name="...">` to `testResult.testName`.
+- Always include `time` as seconds (float), not milliseconds. JUnit XML uses seconds with decimal precision: `time="1.234"` not `time="1234"`.
+- Include `<failure message="..." type="TestFailure">` for failed tests with the error message in the element body. Without the `message` attribute, some tools show an empty failure.
+- Wrap test suites in `<testsuites>` (plural) as the root element -- some parsers choke on `<testsuite>` as root.
+- Validate generated XML against the Testmo XSD schema during development.
+- XML-escape all text content: test names, error messages, and case descriptions may contain `<`, `>`, `&`, `"` characters that break XML parsing.
 
 **Warning signs:**
-- `--no-cache` passed on CLI but AI agent still replays from cache
-- `options.cache` is always `true` regardless of flag
-- Reading `options.noCache` in code returns `undefined` every time
+- GitHub Actions test summary shows 0 tests when there should be results
+- Jenkins JUnit plugin shows "No test results found"
+- CI report shows test names but no grouping/hierarchy
+- XML parsing error in CI logs mentioning malformed XML or unescaped characters
 
-**Phase to address:** CLI flags implementation — the phase that adds `--dry-run`, `--verbose`, `--no-cache`, `--only`.
+**Phase to address:** JUnit XML output format implementation. Should be built after JSON output since both share the same data flow.
 
 ---
 
-### Pitfall 3: Real-Time Progress Output Corrupts Piped/Redirected Output and CI Logs
+### Pitfall 3: Env Var Interpolation Exposes Secrets in Cache Files and Error Messages
 
 **What goes wrong:**
-Adding step-by-step progress output (e.g., "Step 3: clicking login button...") to stdout during AI execution corrupts any downstream consumer that expects parseable output. In CI, the test logs become interleaved with ANSI escape codes from spinners or progress lines. When users pipe output (`superghost --config tests.yaml | tee results.log`), the log file contains spinner control sequences (`\r`, `\x1b[K`, `\x1b[2K`) that break parsing. The existing `nanospinner` library in the project does not document explicit TTY detection or CI environment handling — its behavior in non-TTY contexts is not guaranteed by its README.
+Adding `${VAR}` interpolation in YAML configs lets users write `baseUrl: ${API_BASE_URL}` instead of hardcoding URLs. The resolved value flows into the config object, which flows into cache keys (`CacheManager.hashKey(testCase, baseUrl)`), cache file metadata, error messages, and potentially JSON/JUnit output. If `${API_SECRET}` or `${PRIVATE_TOKEN}` is interpolated into a test case description or context field, the resolved secret value ends up in:
+1. `.superghost-cache/` JSON files (committed to git if not in `.gitignore`)
+2. JUnit XML `<testcase>` attributes and failure messages
+3. JSON output `testCase` and `error` fields
+4. stderr error messages ("Error: baseUrl unreachable: https://secret-token@api.example.com")
 
 **Why it happens:**
-Progress output is designed for interactive terminals where ANSI codes render cleanly. When stdout is piped or redirected, it is no longer a TTY (`process.stdout.isTTY` is `undefined`/`false`). Libraries that do not explicitly check `isTTY` before writing animation frames emit control sequences into the byte stream. `nanospinner` uses `process.stdout` by default but its source shows minimal CI detection. The Vercel AI SDK's `onStepFinish` callback provides a clean hook for step progress that does not need to use spinner animation at all.
+Env var interpolation is typically implemented as a string-replace pass over the raw YAML before or after parsing. The resolved values become indistinguishable from literal config values throughout the rest of the system. No component downstream of the config loader knows which values came from env vars vs. literals. Cache files store the full resolved `testCase` and `baseUrl` in plain JSON. The cache directory is often not in `.gitignore` because users want to commit it for deterministic CI replays.
 
 **How to avoid:**
-- Route ALL progress output (step events, "running AI...") to `process.stderr`, not `process.stdout`. Reserve stdout for parseable, pipeline-safe output only.
-- Before emitting any ANSI or spinner output, check `process.stderr.isTTY`. If false (piped, redirected, CI), emit plain-text lines without escape codes.
-- Check `process.env.CI`, `process.env.NO_COLOR`, and `process.env.TERM === 'dumb'` as additional signals to disable animation.
-- Use the `onStepFinish` callback in `generateText` to receive step events, then conditionally format them (spinner update in TTY, plain log line in non-TTY).
-- Never write progress to stdout — it creates silent interoperability failures that are hard to debug after the fact.
+- Interpolate env vars AFTER YAML parsing but BEFORE Zod validation, so the values are validated but originate from env vars.
+- For cache key computation: hash the INTERPOLATED values (so `${API_BASE_URL}` resolving to different values in different environments produces different cache keys). This is correct behavior.
+- For cache file storage metadata: store the TEMPLATE form (`${API_BASE_URL}`) in the `testCase`/`baseUrl` metadata fields, not the resolved value. The hash uses the resolved value; the human-readable metadata uses the template.
+- For error messages and output: redact any value that came from env var interpolation in stderr error messages. At minimum, truncate to show only the var name: `baseUrl unreachable: ${API_BASE_URL} (resolved)`.
+- Add `.superghost-cache/` to the default `.gitignore` recommendation in docs and `--init` scaffolding.
+- Never interpolate env vars in test `case` descriptions sent to the AI agent. The AI does not need the secret value -- it needs the instruction. If a user writes `case: "Login with password ${SECRET}"`, that is a misuse. Warn when an env var is found inside a `case` field.
 
 **Warning signs:**
-- `superghost ... | grep "PASSED"` returns no matches because progress lines are interleaved in stdout
-- CI log viewer shows garbled output with `^[[2K` or `\r` characters
-- Tailing a log file shows "spinning" characters in the file contents
-- `--json` output (if added later) contains progress lines embedded in the JSON stream
+- Git diff shows API keys or tokens appearing in `.superghost-cache/` JSON files
+- JUnit XML report in CI artifacts contains secret values in test names
+- Error messages in CI logs expose interpolated secret URLs
+- Cache files work locally but fail in CI because the env var resolves differently (this is correct behavior, but confusing if the user expects cache portability)
 
-**Phase to address:** Real-time progress output implementation. Must be addressed before this feature ships — it cannot be an afterthought.
+**Phase to address:** Env var interpolation implementation. Must be designed with the cache and output layers in mind from the start.
 
 ---
 
-### Pitfall 4: Dry-Run Diverges from Real Execution Due to Wiring Differences
+### Pitfall 4: GitHub Actions Required Check Name Mismatch Silently Blocks All PRs
 
 **What goes wrong:**
-`--dry-run` is supposed to show "what would happen" without actually running tests. The natural implementation — checking `if (options.dryRun) { logPlan(); return; }` early in the flow — means the dry-run code path never exercises config validation, MCP initialization, API key validation, or baseUrl reachability. Users see a clean dry-run output but then get a startup failure when they actually run the tests. The more the dry-run path diverges from the real path, the less useful it becomes. Users trust dry-run and are surprised when the real run fails.
+When setting up PR gates with required status checks, the check name in branch protection must EXACTLY match the job name in the workflow YAML. If the workflow has `jobs: lint:` but branch protection requires `Lint` (capitalized), every PR will hang with "Expected -- Waiting for status to be reported" and can never merge. The reverse is equally dangerous: renaming a job in the workflow YAML (e.g., from `test` to `typecheck-and-test`) causes the required check to reference a name that no longer exists, blocking all PRs until a repo admin fixes branch protection.
 
 **Why it happens:**
-Dry-run implementations naturally start as a simple "print config and exit" addition. Every added shortcut (skip MCP init, skip API key check, skip preflight) makes the dry-run faster but less accurate. The critical missing feature: dry-run should still validate that all the inputs are correct; it should only skip the AI execution steps.
+GitHub Actions status check names are composed from `workflow name / job name` (e.g., `CI / lint`). Branch protection matches on these composite names, which are case-sensitive strings. There is no validation that a required check name corresponds to an existing workflow job. Renaming a workflow file, a job key, or the workflow `name:` field silently breaks the association. GitHub does not warn about orphaned required checks.
 
 **How to avoid:**
-- Dry-run must still run: `loadConfig()`, Zod schema validation, API key presence check (not validity, just presence), and baseUrl reachability preflight check.
-- Dry-run skips only: `mcpManager.initialize()`, `executeAgent()`, and `cacheManager.save()`.
-- Output for dry-run: print the full test plan (test names, base URLs, which would use cache, which would run AI), then exit 0.
-- Clearly document in the help text: "validates config and previews test plan without running AI or browser."
-- If `--dry-run` is combined with `--no-cache`, the output should note which tests would normally hit cache but will be forced to run AI.
+- Use explicit, stable job names with the `name:` field in each job (not just the job key). Example: `jobs: lint: name: "Lint"`. This decouples the display name from the YAML key.
+- Document the exact required check names in a comment at the top of each workflow file: `# Required check: "CI / Lint"`.
+- After setting up branch protection, immediately test by creating a PR to verify all checks appear and complete.
+- Keep the number of required checks minimal. Use a single "CI" workflow with multiple jobs rather than multiple workflows. This keeps the required check list short and manageable.
+- Do NOT use path filtering (`on: push: paths:`) on workflows that contain required checks. If the workflow does not trigger (because no matching paths changed), the required check stays in "Pending" forever, blocking the PR.
+- Consider a "gate" job that depends on all other jobs (`needs: [lint, test, typecheck]`) and make only that single job required. If individual jobs are renamed, only the `needs` list changes, not branch protection.
 
 **Warning signs:**
-- Dry-run completes successfully but `--config` with a typo in the path also completes successfully (config was never loaded)
-- Dry-run shows "3 tests would run" but the real run shows "config error: invalid baseUrl"
-- Users file bugs "dry-run lied to me about the config"
+- PR stuck at "Some checks haven't completed yet" with a check showing "Expected"
+- All PRs blocked after a workflow rename or refactor
+- New contributors cannot merge even after all visible checks pass
+- Branch protection shows required checks that do not match any workflow job
 
-**Phase to address:** CLI flags implementation, specifically the `--dry-run` path.
+**Phase to address:** PR workflow gates setup. Must be the LAST CI/CD feature implemented, after all workflow jobs are finalized and their names are stable.
 
 ---
 
-### Pitfall 5: Preflight HTTP Check Adds Latency and Produces False Negatives on Slow Servers
+### Pitfall 5: Biome Linting Retroactively Applied to Existing Codebase Creates Hundreds of Violations
 
 **What goes wrong:**
-A HEAD request to `baseUrl` before tests run is the right pattern, but naive implementation introduces two failure modes: (1) the timeout is too short — a server that responds in 3s fails the 1s default check, blocking valid test runs; (2) the timeout is too long — a server that never responds hangs the CLI for 30s before tests can start. There is also a semantic problem: a slow server that responds with `502 Bad Gateway` at the load balancer during a rolling deploy is "reachable" (returns HTTP) but the tests will fail. A correct preflight checks connectivity, not deployment health.
+Adding Biome (or any linter/formatter) to an existing 3,787 LOC codebase and running `biome ci` immediately fails with hundreds of violations. If this is wired into a pre-commit hook or CI check, all work on the repo is blocked until every violation is fixed. This creates a massive "stop the world" commit that touches every file, making git blame useless for the entire history and creating merge conflicts with any in-flight branches.
 
 **Why it happens:**
-Developers reach for `fetch(baseUrl)` with a default timeout or no timeout at all. Bun's `fetch` has had documented timeout issues — a default `idleTimeout` of 10 seconds was added in v1.1.26 and then the default changed to `0` (disabled). Without an explicit `AbortController` timeout, a hanging server will block the CLI indefinitely. Additionally, the preflight check is typically added as a full GET request against the root URL, which can trigger expensive server-side operations (authentication redirects, analytics tracking, etc.) that a HEAD request would avoid.
+Biome's default ruleset is opinionated and comprehensive (423+ rules). A codebase written without a linter will inevitably violate many rules: inconsistent formatting, import ordering, unused variables, non-null assertions, etc. Running `biome check` on the full codebase for the first time surfaces all accumulated style drift at once. The temptation is to run `biome check --write` to auto-fix everything, but this produces a single giant commit that rewrites most files.
 
 **How to avoid:**
-- Use `HEAD` not `GET` for the preflight check — it avoids response body overhead and sidesteps many server-side behaviors.
-- Set a configurable timeout via `AbortController` with a sensible default (5 seconds). Do not rely on Bun's `fetch` default timeout behavior across versions.
-- On timeout or connection refused: print a clear warning, not an error. Give the user the option to continue anyway with `--skip-preflight` or equivalent.
-- On any non-2xx/non-3xx status: still warn but do not block. A 404 at the root is still connectivity confirmed. Only treat connection refused and timeout as "server may be down."
-- Skip the preflight check in dry-run mode (since no actual tests will run).
-- Make the preflight timeout configurable in the YAML config (`preflightTimeout: 5000`).
+- Phase the rollout: first add Biome with `biome init`, configure it, and run `biome format --write .` as a single formatting-only commit. Formatting changes are cosmetic and do not change behavior -- this is the safe "big bang" commit.
+- After formatting, enable lint rules incrementally. Start with `recommended` rules and disable any that produce excessive violations using `overrides` or by setting specific rules to `"warn"` instead of `"error"`.
+- Configure `biome ci` to check only CHANGED files in CI (not the whole codebase) during the transition period: use `biome ci --changed --since=main`.
+- Do the formatting commit on main BEFORE any feature branches diverge, to avoid merge conflicts.
+- Use `biome migrate` if coming from ESLint/Prettier -- but SuperGhost has no existing linter, so start fresh.
+- Pin Biome version exactly (`-E` flag during install) to prevent rule changes across minor versions from breaking CI.
 
 **Warning signs:**
-- `superghost` hangs for 30+ seconds before printing any output
-- Tests are blocked by preflight even when the server is running (slow cold start)
-- `fetch` call in preflight triggers rate limiting or auth redirect on the target server
-- Tests with per-test `baseUrl` overrides skip the global preflight and the per-test URL is never checked
+- First `biome ci` run in CI fails with 200+ violations
+- Feature branches cannot pass CI because the linting commit was added to main after they branched
+- `git blame` on any file shows the formatting commit for every line
+- Pre-commit hook takes 5+ seconds because it checks all files, not just staged ones
 
-**Phase to address:** Preflight check implementation phase.
+**Phase to address:** Linting/formatting enforcement. This should be the FIRST feature in the milestone -- before any other code changes -- so the formatting baseline is established and all subsequent changes comply.
 
 ---
 
-### Pitfall 6: Cache Key Normalization Breaks Existing Cache Files
+### Pitfall 6: Env Var Interpolation Creates Ambiguity Between Literal `$` Characters and Variable References
 
 **What goes wrong:**
-The current `CacheManager.hashKey()` hashes `${testCase}|${baseUrl}` verbatim. If v0.2 adds normalization (trim whitespace, lowercase, collapse multiple spaces), all existing cache files become unreachable — their keys were computed without normalization. On the first run after the upgrade, every test re-runs via AI, users see no cache hits, and the experience regresses. Worse: if normalization is applied inconsistently (only in `hashKey` but the stored `testCase` field in the JSON is the raw form), there is a permanent mismatch between the stored key and how future lookups will compute the hash.
+YAML config values like `case: "Check that price shows $50"` contain a literal `$` that the interpolation engine might interpret as `${50}` or choke on `$5`. A naive regex like `/\$\{([^}]+)\}/g` correctly handles `${VAR}` syntax but `/\$(\w+)/g` (bare `$VAR` syntax without braces) would falsely match `$50`, `$path`, etc. Even with the `${...}` syntax, edge cases include `$${escaped}` (should this be literal `${escaped}`?), empty `${}` (what happens?), nested `${VAR_${ENV}}` (should this be supported?), and undefined vars `${NONEXISTENT}`.
 
 **Why it happens:**
-Cache key normalization is an in-place change to the hashing function. There is no migration path for existing cache files, and no cache schema version bump to signal "old cache = invalid." The atomic-write-then-rename pattern protects against corruption but does nothing about hash function changes.
+There is no universal standard for env var interpolation in YAML. Docker Compose uses `${VAR}` and `${VAR:-default}`. Helm uses Go templates `{{ .Values.x }}`. Spring Boot uses `${VAR:default}`. Users bring assumptions from their ecosystem. The implementation must decide: what syntax is supported, what happens on undefined vars, and how to escape literal `$`.
 
 **How to avoid:**
-- Normalize consistently: apply normalization in `hashKey()` and normalize `testCase` before passing it to `hashKey()` everywhere (both save and load paths).
-- Include the normalization strategy version in the hash input: `v2|${normalizedCase}|${baseUrl}` — this causes a clean break with v1 keys rather than a silent mismatch.
-- When incrementing the cache version (from `version: 1` to `version: 2` in `CacheEntry`), delete or ignore any cache entry that does not match the current version.
-- Document in the release notes: "v0.2 normalizes cache keys — your `.superghost-cache/` will be invalidated on first run. All tests re-run via AI once, then cache as normal."
-- Consider adding a `superghost --clear-cache` command so users can explicitly purge rather than discovering stale cache by accident.
+- Support ONLY `${VAR}` syntax (with braces). Never support bare `$VAR` -- it creates too many ambiguities with literal dollar signs, shell escapes, and YAML quoting.
+- On undefined env var: FAIL LOUDLY with exit code 2 and a clear error message: `"Environment variable 'API_KEY' is not set (referenced in config field 'baseUrl')"`. Do NOT silently substitute empty string -- this creates mysterious failures downstream ("baseUrl is empty").
+- Provide an escape hatch: `$${VAR}` produces literal `${VAR}` (double dollar escapes). This matches Docker Compose convention.
+- Do NOT support default value syntax (`${VAR:-default}`) in v0.3. It adds parsing complexity and can be added later. Keep the syntax simple.
+- Do NOT support nested interpolation (`${VAR_${ENV}}`). It is rarely needed and creates a recursive parsing problem.
+- Apply interpolation to string values only. If a YAML field is typed as `number` (e.g., `timeout`), do not attempt interpolation -- the Zod schema will catch the type mismatch after interpolation.
+- Run interpolation BEFORE Zod validation so that missing/malformed env vars produce config validation errors, not runtime crashes.
 
 **Warning signs:**
-- After upgrading to v0.2, all tests show `source: "ai"` instead of `source: "cache"` even for tests that were previously cached
-- Cache directory has doubled in file count (old v1 hashes AND new v2 hashes both present)
-- `load()` always returns `null` for tests that have cache files on disk
+- Test case with `$50` in the description silently becomes `0` or empty string after interpolation
+- Undefined env var produces a blank `baseUrl` that passes validation but causes test failure
+- Users confused by `$$` escaping or surprised that `$VAR` without braces is not supported
+- YAML with single-quoted strings (`'${VAR}'`) does not interpolate (YAML single quotes are literal)
 
-**Phase to address:** Cache key normalization phase. The version bump and migration strategy must be designed before implementation begins.
+**Phase to address:** Env var interpolation implementation. Syntax decisions must be locked before implementation begins.
 
 ---
 
-### Pitfall 7: Unicode Edge Cases Create Silent Cache Mismatches
+### Pitfall 7: JSON and JUnit Output Formats Missing Error Metadata That CI Tools Expect
 
 **What goes wrong:**
-JavaScript strings can represent the same visible character via multiple Unicode code point sequences (Unicode equivalence). For example, `"café"` can be encoded as NFC (precomposed: `\u0063\u0061\u0066\u00E9`) or NFD (decomposed: `\u0063\u0061\u0066\u0065\u0301`). A test case description pasted from a macOS text editor may use NFD (macOS normalizes to NFD by default), while the same description typed in a Linux editor may use NFC. Both look identical on screen. SHA-256 hashing is byte-exact — they produce different hashes, causing a cache miss on a logically identical test case. This is not a theoretical edge case for a multilingual user base.
+The current `TestResult` type contains `testName`, `testCase`, `status`, `source`, `durationMs`, `error?`, and `selfHealed?`. This is sufficient for the console reporter but insufficient for CI consumption. CI tools expect: test suite name, test suite timestamp, test case class/category, number of assertions, environment info, and structured failure details. JSON consumers expect a schema version field so they can detect format changes. JUnit consumers expect `<system-out>` and `<system-err>` capture per test case. Without these, the output "works" but provides degraded value in CI dashboards.
 
 **Why it happens:**
-Bun's `CryptoHasher` operates on raw bytes. JavaScript's `String.prototype.normalize()` is not called automatically. YAML parsing preserves the byte sequence from the file. macOS file I/O frequently uses NFD; Linux and Windows use NFC. A test suite developed on Mac and run in a Linux CI container can experience cache miss on every run even when tests pass, because all hash lookups miss.
+The `TestResult` type was designed for the `ConsoleReporter`, which only needs name, status, and error. The new output formats need richer metadata that does not exist in the current data model. Retrofitting this metadata is straightforward but easy to forget -- the JSON/JUnit reporters can only emit what `TestResult` and `RunResult` provide.
 
 **How to avoid:**
-- Call `testCase.normalize("NFC")` before hashing. NFC is the recommended normalization form for storage and comparison (per Unicode Consortium UAX #15).
-- Apply normalization in `hashKey()` before any other processing, so it is impossible to bypass.
-- Also trim leading/trailing whitespace and collapse internal runs of whitespace to single spaces as part of the same normalization step.
-- The cache JSON's `testCase` field should store the normalized form (not the original), so the stored key and the lookup key always match.
+- Extend `RunResult` with: `suiteName` (config file name or explicit name), `timestamp` (ISO 8601 run start time), `superghost version`, `model` used, `provider` used.
+- Extend `TestResult` with: `baseUrl` (the resolved base URL for this test), `testType` ("browser" | "api"), `stepCount?` (number of steps executed).
+- Add a `schemaVersion` field to JSON output (start at `1`). Increment when the JSON structure changes. This lets consumers detect format changes.
+- For JUnit XML: populate `<system-out>` with the step progression log for each test case (not the full AI conversation, just the step summaries). This gives CI dashboards drill-down capability.
+- Design the extended `RunResult`/`TestResult` types BEFORE implementing either output format. Both formatters consume the same data.
 
 **Warning signs:**
-- Tests cached on macOS miss on Linux CI
-- `load()` returns `null` for tests that look exactly right in the YAML
-- Cache files exist on disk but are never used (hash prefix in filename doesn't match computed hash)
+- JSON output has no version field -- consumers cannot detect schema changes
+- JUnit XML test cases show no details beyond pass/fail
+- CI dashboard shows test results but no timing, no environment, no grouping
+- Adding a field to JSON output later breaks existing consumers (no schema version to key off)
 
-**Phase to address:** Cache key normalization phase — handle Unicode in the same commit as whitespace normalization.
-
----
-
-### Pitfall 8: `--only` Pattern With Zero Matches Silently Exits 0
-
-**What goes wrong:**
-`superghost --only "login"` should filter to tests whose name matches the pattern. If no tests match (typo in pattern, wrong case, wrong format), the intuitive behavior is an error. The naive implementation runs `config.tests.filter(t => t.name.includes(pattern))` and passes an empty array to `TestRunner`. `TestRunner.run()` iterates an empty array, `aggregateResults([])` returns `{ passed: 0, failed: 0 }`, the reporter prints "0 tests run," and the process exits `0`. A CI pipeline sees `exit 0` and reports success when in fact the user's intent was to run specific tests and nothing ran.
-
-**Why it happens:**
-An empty test suite is not an error condition in the current `TestRunner` design — it is a degenerate case that was never considered. The Zod schema requires `tests.min(1)` in the config file, but the `--only` filter operates after config validation, so it can produce an empty set without Zod catching it.
-
-**How to avoid:**
-- After applying the `--only` filter, check if the result is empty. If empty, exit `2` with an error message: `"No tests matched pattern: 'login'. Available test names: [...]"`.
-- This is not a test failure (exit 1) or a config error — it is a user input error, which correctly maps to exit 2.
-- Print the available test names in the error message to help the user correct the pattern.
-- For `--only`, use case-insensitive substring matching by default (most intuitive for quick filtering). Document the exact match semantics.
-- Support both substring and glob patterns if feasible; if implementing glob, be explicit about case sensitivity.
-
-**Warning signs:**
-- CI passes but no tests ran (exit 0 with "0 tests" output)
-- User complains "my tests aren't running" but the exit code is 0
-- Test output shows "Passed: 0, Failed: 0" but the user intended to run specific tests
-
-**Phase to address:** CLI flags implementation, `--only` path.
+**Phase to address:** Output format data model design. Must happen before JSON or JUnit implementation begins.
 
 ---
 
@@ -207,29 +200,33 @@ Shortcuts that seem reasonable but create long-term problems.
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Skip config validation in `--dry-run` | Faster dry-run implementation | Dry-run becomes unreliable; users lose trust in the feature | Never — always run validation |
-| Log progress to stdout instead of stderr | Simpler single-stream output | Breaks piping, JSON output, log parsing forever | Never |
-| Hardcode preflight timeout to 5000ms | No new config surface | Breaks users on slow local servers; no tuning option | Never — make it configurable from the start |
-| Normalize cache keys in `hashKey()` without version bump | Smaller diff | Existing cache files silently stop working; mysterious cache misses | Never |
-| Apply `--only` filter after cache lookup | Simpler code flow | Cache is still read for tests that will be filtered out | Never — filter before any I/O |
-| Use `process.stdout.write` for progress even when not TTY | Easy implementation | ANSI pollution in pipes, CI logs | Never |
-| Keep `exit 1` for config errors in the new scheme | No breaking change | Defeats the purpose of exit code taxonomy | Never — commit to the new taxonomy |
+| Generate JUnit XML with string concatenation instead of an XML builder | No new dependency | XML injection from test names containing `<`, `>`, `&`; breaks on non-ASCII characters | Never -- use proper XML escaping at minimum |
+| Skip JSON schema version field | Simpler JSON output | Cannot evolve the JSON format without breaking consumers; no migration path | Never |
+| Interpolate env vars with a single regex replace | Quick implementation | Breaks on `$$` escaping, nested `${}`, and literal `$` in non-string contexts | Acceptable for v0.3 if ONLY `${VAR}` syntax is supported and edge cases are tested |
+| Run `biome check` on ALL files in CI instead of changed files | Simpler CI config | Slower CI; unrelated formatting issues block PRs for code they did not touch | Acceptable after the initial formatting commit |
+| Use `--output json > results.json` as the only documented JSON usage | Simple docs | Users who want both human output AND JSON for CI must run twice | Add `--output-file` option to write structured output to a file while keeping stderr human output |
+| Configure all required checks individually in branch protection | Direct mapping | Fragile -- any job rename breaks merging | Never -- use a single gate job that `needs:` all others |
+| Store resolved env var values in cache metadata | Correct cache keying | Secrets leak into cache files on disk | Never -- store template form in metadata, resolved form only in hash |
 
 ---
 
 ## Integration Gotchas
 
-Common mistakes when connecting the new flags to the existing system.
+Common mistakes when connecting v0.3 features to the existing system.
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| `--no-cache` + `CacheManager` | Pass a `noCache: boolean` prop through many layers | Add a `disableCache` flag to `TestExecutor` constructor; `CacheManager` stays unchanged |
-| `--only` + `TestRunner` | Filter inside `TestRunner.run()` | Filter `config.tests` in `cli.ts` before constructing `TestRunner`; runner does not need to know about patterns |
-| `--dry-run` + `McpManager` | Skip `McpManager.initialize()` entirely | Skip it — but still run all validation before the `if (dryRun) return;` guard |
-| Preflight check + per-test `baseUrl` | Only check `config.baseUrl` | Collect all unique baseUrls (global + per-test overrides), check each once before running any tests |
-| `onStepFinish` progress + `ConsoleReporter` spinner | Both try to write to stdout simultaneously | Progress output from `onStepFinish` must be routed through the reporter; reporter manages all output |
-| Exit code `2` + `ConfigLoadError` path in `catch` | The catch block still calls `process.exit(1)` | Update the catch block to call `process.exit(2)` for config/infra errors; keep `process.exit(1)` for test failures only |
-| `--verbose` flag + nanospinner spinner | Spinner overwrites verbose lines on same line via `\r` | Suppress spinner entirely in `--verbose` mode; use plain sequential log lines instead |
+| `--output json` + Commander.js | Commander writes `--help` and `--version` to stdout, corrupting JSON | Use `program.configureOutput()` to redirect Commander stdout to stderr |
+| `--output json` + error paths | Config errors write to stderr but JSON consumer expects errors on stdout too | When `--output json` is active, errors must produce valid JSON on stdout with an `error` field, THEN exit |
+| `--output junit` + test name escaping | Test names containing `<`, `>`, `&`, `"` break XML | XML-escape all dynamic content: names, error messages, case descriptions |
+| Env var interpolation + Zod validation | Interpolation runs after Zod, so `${VAR}` is validated as a literal string and fails URL validation | Run interpolation BEFORE Zod `safeParse()` -- interpolate raw YAML object, then validate |
+| Env var interpolation + cache keys | Cache key uses template `${VAR}` instead of resolved value | Interpolate first, then pass resolved values to `CacheManager`. Cache must key on actual values |
+| Biome + existing CI workflows | Add `biome ci` to release workflow but not PR workflow | Add lint check to PR workflow first; release workflow inherits from passing PRs |
+| Biome + `.ts` extension imports | Biome may flag `import { X } from "./foo.ts"` depending on config | Configure Biome to allow `.ts` extensions (Bun requires them; Node does not) |
+| JUnit XML + `time` attribute | Pass milliseconds instead of seconds | JUnit XML `time` attribute is seconds as a float: `time="1.234"` not `time="1234"` |
+| PR gate workflow + E2E tests | Make E2E tests (which need `ANTHROPIC_API_KEY`) a required check on PRs | E2E tests should NOT be required on PRs -- they need secrets, cost money, and are slow. Use a separate workflow triggered by `workflow_dispatch` or `schedule` only |
+| Multiple output formats + `onRunComplete` | Reporter writes both human output and structured output in same `onRunComplete` | Create separate reporter instances: `ConsoleReporter` always writes to stderr; `JsonReporter`/`JUnitReporter` writes to stdout. Both receive the same events |
+| Contributor docs + dev setup | CONTRIBUTING.md says "run `npm install`" when project uses Bun | All setup instructions must use `bun install`, `bun test`, `bunx` -- never npm/npx equivalents |
 
 ---
 
@@ -239,25 +236,40 @@ Patterns that work at small scale but cause problems as the test suite grows.
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Preflight check per test (not per unique baseUrl) | 10-test suite does 10 HTTP checks at startup | De-duplicate baseUrls; check each unique URL once | Suites with 5+ unique baseUrls |
-| Reading all cache files to check for `--only` matches | Slow startup on large cache dirs | `--only` filter operates on config, not cache; cache is read lazily during execution | Cache dirs with 100+ entries |
-| Verbose output buffered and dumped at end | Logs arrive too late to be useful during long runs | Stream verbose output in real-time to stderr; do not buffer | Any run > 30 seconds |
-| Preflight check blocks suite startup during CI cold start | Tests fail because server hasn't warmed up | Configure a retry count (2-3 retries with 1s backoff) before failing preflight | Any server with >2s cold-start |
+| JUnit XML building entire DOM in memory | High memory usage with large test suites | Stream XML elements sequentially; do not build a full document tree | Suites with 100+ tests producing verbose failure output |
+| JSON output buffering all results before serializing | Memory spike at end of long run | Acceptable for v0.3 (test suites are small); plan for streaming JSON Lines if suites grow | Suites with 500+ tests |
+| Env var interpolation scanning all string values recursively | Slow config loading with deeply nested configs | Only scan known string fields (baseUrl, case, context, name) | Configs with 50+ tests each with multiple string fields |
+| Biome checking all files on every commit | Slow pre-commit hook | Configure pre-commit to check only staged files: `biome check --staged --changed` | Repos with 100+ source files |
+| Single CI workflow running lint, test, typecheck sequentially | CI takes 3x longer than needed | Run lint, test, typecheck as parallel jobs in the same workflow | Any CI run -- parallel from the start |
+
+---
+
+## Security Mistakes
+
+Domain-specific security issues for this milestone.
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Env var interpolation resolving secrets into cache files | API keys, tokens stored in plain JSON on disk, possibly committed to git | Store template form in metadata; only use resolved values in hash computation and runtime execution |
+| JUnit XML or JSON output containing resolved env var secrets | CI artifacts expose secrets in test reports | Redact or template-ify any value that originated from env var interpolation in output |
+| YAML env var interpolation supporting `${PATH}` or `${HOME}` | Users accidentally interpolate system vars, leaking system info into cache/output | Consider a prefix requirement (e.g., only `${SUPERGHOST_*}` or `${SG_*}` vars) or at minimum document that ALL env vars are eligible |
+| GitHub Actions workflow with `pull_request_target` trigger | External PRs from forks run with write permissions and access to secrets | Use `pull_request` trigger (not `pull_request_target`) for PR checks; only use `pull_request_target` if explicitly needed for comment APIs |
+| SECURITY.md without actual security contact | Users report vulnerabilities publicly in GitHub issues | Include a real email or use GitHub's private vulnerability reporting feature |
 
 ---
 
 ## UX Pitfalls
 
-Common user experience mistakes when adding DX flags.
+Common user experience mistakes when adding these features.
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-----------------|
-| `--verbose` dumps raw tool call JSON | Output is unreadable; too much noise | Format tool calls as human-readable summaries: "browser_click: selector=#submit-btn" |
-| Dry-run output format identical to real run output | User can't tell if they ran dry-run or real tests | Prefix every dry-run output line with `[DRY RUN]`; add a banner at start and end |
-| Preflight error is fatal with no override | Users testing locally with slow dev servers are blocked | Make preflight a warning, not a hard stop; allow `--skip-preflight` override |
-| `--only` is case-sensitive substring match | User types `--only Login` but test is named `login flow` | Use case-insensitive matching by default |
-| Progress output shows tool call names like `browser_snapshot` | Non-technical users confused by internal tool names | Map tool names to human descriptions: "browser_snapshot" → "capturing page state" |
-| `--no-cache` runs silently with no indication cache was bypassed | User unsure if flag took effect | Print "(cache bypassed)" in the per-test output line when `--no-cache` is active |
+| `--output json` replaces all output (no human feedback during run) | User sees nothing for 60+ seconds during AI execution, then gets a JSON dump | Keep stderr human output (spinner, progress) always active; JSON goes to stdout only at the end |
+| JUnit XML has no test case details beyond pass/fail | CI dashboard is useless for debugging failures | Include failure message in `<failure message="...">` and step log in `<system-out>` |
+| Env var error says "config validation failed" without mentioning which var was undefined | User has no idea which env var to set | Error message must name the var: `"Environment variable 'API_BASE_URL' is not set (referenced in 'baseUrl')"` |
+| CONTRIBUTING.md assumes deep TypeScript/Bun knowledge | New contributors bounce off setup instructions | Include exact commands, expected output, and troubleshooting for common "bun not found" issues |
+| `--output json` and `--output junit` are mutually exclusive with no way to get both | CI needs JUnit for test reporting AND JSON for custom dashboards | Support `--output-file results.xml` to write structured output to file while still emitting the other format to stdout |
+| Biome formatting changes all files on first run, confusing contributors | "I only changed one file but the diff shows 50 files" | Do the formatting commit BEFORE any contributor-facing docs; mention in CONTRIBUTING.md that formatting is enforced |
 
 ---
 
@@ -265,14 +277,19 @@ Common user experience mistakes when adding DX flags.
 
 Things that appear complete but are missing critical pieces.
 
-- [ ] **Exit code 2:** Often missing — verify that `ConfigLoadError`, missing API key, preflight failure, and zero-match `--only` ALL exit `2`, not `1`. Check the existing catch blocks in `cli.ts` are updated.
-- [ ] **`--no-cache` flag:** Often missing — verify `options.cache` (not `options.noCache`) is read, and that the flag actually skips both cache read AND cache write (not just one).
-- [ ] **Preflight check with per-test baseUrls:** Often missing — verify tests that override `baseUrl` at the test level also get their URL checked, not just the global config `baseUrl`.
-- [ ] **Dry-run config validation:** Often missing — verify `loadConfig()` and Zod validation still run in dry-run mode; typo in config path should still produce an error.
-- [ ] **Progress output in non-TTY:** Often missing — verify that running `superghost ... > output.txt` produces clean text in the file, not ANSI escape sequences.
-- [ ] **`--only` zero-match error:** Often missing — verify that a pattern matching no tests exits `2` with an informative message, not `0` with "0 tests run."
-- [ ] **Cache key Unicode normalization consistency:** Often missing — verify that `save()` and `load()` both normalize via the same path; they must call the same `hashKey()` function.
-- [ ] **`--verbose` + spinner conflict:** Often missing — verify that spinner animation does not overwrite verbose output lines in TTY mode; they must not share the same output stream simultaneously.
+- [ ] **JSON output:** Often missing -- verify that config errors ALSO produce valid JSON (not just stderr text) when `--output json` is active. Test: `superghost --config nonexistent.yaml --output json | jq .`
+- [ ] **JSON schema version:** Often missing -- verify JSON output includes a `version` or `schemaVersion` field at the top level. Without it, format changes are breaking changes.
+- [ ] **JUnit XML classname:** Often missing -- verify every `<testcase>` has a `classname` attribute. Test: upload to GitHub Actions and verify tests appear in the test summary.
+- [ ] **JUnit XML time format:** Often wrong -- verify `time` attributes are in seconds (float), not milliseconds. `time="1.234"` not `time="1234"`.
+- [ ] **JUnit XML escaping:** Often missing -- verify test names with `<`, `>`, `&`, `"`, `'` characters produce valid XML. Test: create a test named `Check <script> & "quotes"` and verify XML parses.
+- [ ] **Env var undefined handling:** Often wrong -- verify undefined `${VAR}` produces exit code 2 with a clear error, not empty string substitution.
+- [ ] **Env var in cache metadata:** Often missing -- verify cache JSON files store `${VAR}` template form, not the resolved secret value.
+- [ ] **Env var literal dollar sign:** Often missing -- verify `case: "Price is $50"` works without attempting interpolation (no braces = no interpolation).
+- [ ] **Biome + `.ts` imports:** Often missing -- verify Biome does not flag Bun-style `.ts` extension imports as errors.
+- [ ] **PR gate workflow + secrets:** Often wrong -- verify PR workflow does NOT require `ANTHROPIC_API_KEY` or other secrets. Fork PRs have no access to secrets and would fail silently.
+- [ ] **CONTRIBUTING.md + Bun commands:** Often wrong -- verify all commands use `bun`/`bunx`, not `npm`/`npx`. Test: follow the doc from scratch on a clean checkout.
+- [ ] **Commander stdout redirect:** Often missing -- verify `--help` and `--version` output goes to stderr when `--output json` is active (or at least does not corrupt JSON on stdout).
+- [ ] **Multiple reporters wired correctly:** Often missing -- verify that `ConsoleReporter` (stderr) and `JsonReporter` (stdout) both receive `onTestStart`, `onTestComplete`, and `onRunComplete` events. A common bug is wiring only one.
 
 ---
 
@@ -282,12 +299,13 @@ When pitfalls occur despite prevention, how to recover.
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Exit code 1 used for config errors in prod (breaks CI taxonomy) | MEDIUM | Add `exit 2` paths, document breaking change in release notes, provide `--legacy-exit-codes` flag if needed |
-| Cache invalidated by normalization change (all cache misses) | LOW | Document expected behavior in release notes; cache rebuilds automatically on next run |
-| Progress output polluting a production log file | MEDIUM | Hotfix: gate all progress output on `process.stderr.isTTY`; deploy; affected log files must be manually cleaned |
-| Preflight false-negatives blocking CI | LOW | Add `--skip-preflight` flag as an override; reduce default timeout; add retry logic |
-| `--only` zero-match silent success in CI | HIGH | Audit pipeline logs for "0 tests run" patterns; add exit code check; fix the bug; re-run any CI runs that may have passed with zero tests |
-| `--no-cache` not working (always using cache) | MEDIUM | Identify which side (read or write) was missed; verify Commander.js property name; add integration test |
+| JSON output contains non-JSON text on stdout | LOW | Identify the source (Commander, console.log, third-party lib), redirect to stderr, release patch |
+| JUnit XML missing `classname`, CI tools drop results | LOW | Add `classname` attribute, re-generate reports. No data loss -- just regenerate from next run |
+| Secrets in cache files committed to git | HIGH | Rotate exposed secrets immediately. Run `git filter-branch` or `bfg-repo-cleaner` to remove from history. Add cache dir to `.gitignore`. Add secret scanning |
+| GitHub Actions required check name mismatch blocking all PRs | MEDIUM | Repo admin updates branch protection rules to match current workflow job names. Document exact names in workflow comments |
+| Biome formatting commit conflicts with in-flight branches | MEDIUM | Each branch must rebase on main after the formatting commit. Conflicts are cosmetic (whitespace) and auto-resolvable with `git checkout --theirs` for formatting files |
+| Env var undefined produces empty string (silent failure) | MEDIUM | Add validation to fail on undefined vars. Re-run affected CI pipelines that may have passed with empty values |
+| JUnit XML time in milliseconds instead of seconds | LOW | Fix the division, re-run. CI dashboards will show corrected timing on next run |
 
 ---
 
@@ -297,30 +315,39 @@ How roadmap phases should address these pitfalls.
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Exit code 2 breaking existing scripts | Phase 1 (CLI flags + exit codes) | Integration test: assert `exit 1` for test fail, `exit 2` for config error, `exit 0` for pass |
-| `--no-cache` Commander.js prefix trap | Phase 1 (CLI flags) | Unit test: invoke CLI without flag → cache is used; invoke with `--no-cache` → cache bypassed |
-| Progress output corrupts pipes | Phase 2 (real-time progress) | Pipe test: `superghost ... | cat` and verify no ANSI codes in output file |
-| Dry-run diverges from real execution | Phase 1 (CLI flags) | Dry-run test: introduce deliberate config error, verify dry-run also catches it |
-| Preflight latency / false negatives | Phase 3 (preflight check) | Test: point at slow server, verify configurable timeout and graceful warning |
-| Cache normalization breaks existing cache | Phase 4 (cache normalization) | Test: create cache with old key format, verify new run does not find it, verifies re-execution |
-| Unicode cache mismatches | Phase 4 (cache normalization) | Test: hash same string in NFC and NFD, verify `hashKey()` produces identical output |
-| `--only` zero-match silent exit 0 | Phase 1 (CLI flags) | Unit test: `--only nonexistent-pattern` must exit `2` with error message |
+| Biome formatting explosion on existing code | Phase 1: Linting setup (do FIRST, before any feature code) | Run `biome ci` in CI; verify 0 violations on main after formatting commit |
+| JSON output stdout corruption | Phase 2: JSON output format | Integration test: pipe `--output json` through `JSON.parse()`; test error paths too |
+| JUnit XML missing classname | Phase 3: JUnit output format | Upload XML to GitHub Actions; verify test summary displays all tests |
+| JUnit XML time format (ms vs seconds) | Phase 3: JUnit output format | Unit test: assert `time` attribute value matches `durationMs / 1000` |
+| JUnit XML escaping | Phase 3: JUnit output format | Unit test: test name with `<>&"'` characters produces valid XML |
+| Env var interpolation syntax ambiguity | Phase 4: Env var interpolation | Unit test: `$50` is literal, `${VAR}` interpolates, `$${VAR}` escapes, `${}` errors |
+| Env var secrets in cache/output | Phase 4: Env var interpolation | Inspect cache JSON after run with env vars; verify no resolved secrets in metadata |
+| Env var undefined silent failure | Phase 4: Env var interpolation | Integration test: unset var in config, assert exit code 2 with named var in error message |
+| Output format data model gaps | Phase 2: Before JSON/JUnit implementation | Code review: verify `RunResult`/`TestResult` have all fields needed by both formatters |
+| GitHub Actions check name mismatch | Phase 5: PR workflow gates (do LAST) | Create test PR after setup; verify all checks appear and complete |
+| PR workflow requiring secrets | Phase 5: PR workflow gates | Create PR from a fork; verify CI checks pass without secrets |
+| CONTRIBUTING.md with wrong commands | Phase 5: Contributor docs | Follow CONTRIBUTING.md on a fresh clone; verify every command works |
+| Commander stdout in JSON mode | Phase 2: JSON output format | Test: `superghost --output json --help 2>/dev/null \| jq .` should not produce valid JSON (help goes to stderr) |
 
 ---
 
 ## Sources
 
-- Commander.js issue #979 — `--no-` prefix implicit default behavior: https://github.com/tj/commander.js/issues/979
-- Vercel AI SDK — `onStepFinish` callback for step progress: https://ai-sdk.dev/docs/ai-sdk-core/generating-text
-- Bun fetch timeout issues: https://github.com/oven-sh/bun/issues/13392
-- nanospinner npm — TTY behavior undocumented: https://www.npmjs.com/package/nanospinner
-- Unicode normalization UAX #15: https://www.unicode.org/reports/tr15/
-- MDN String.prototype.normalize(): https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/normalize
-- Linux exit code conventions: https://www.baeldung.com/linux/status-codes
-- TTY detection and progress output in CLI tools: https://github.com/forcedotcom/cli/issues/327
-- In praise of --dry-run (Hacker News discussion on implementation pitfalls): https://news.ycombinator.com/item?id=27263136
-- kubectl dry-run pitfalls: https://thelinuxcode.com/kubectl-dry-run/
+- JUnit XML format specification and conventions (Testmo): https://github.com/testmoapp/junitxml
+- JUnit XML `classname` required by ESLint reporter (GitHub issue): https://github.com/eslint/eslint/issues/11068
+- Tips on Adding JSON Output to Your CLI App (Kelly Brazil): https://blog.kellybrazil.com/2021/12/03/tips-on-adding-json-output-to-your-cli-app/
+- npm CLI bug: --json outputs errors to stdout instead of stderr: https://github.com/npm/cli/issues/2150
+- GitHub Actions required checks for conditional jobs: https://devopsdirective.com/posts/2025/08/github-actions-required-checks-for-conditional-jobs/
+- GitHub Docs: Troubleshooting required status checks: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks
+- GitHub community: Status checks "required if run" discussion: https://github.com/orgs/community/discussions/26092
+- GitHub community: Stuck in "Expected -- Waiting for status to be reported": https://github.com/orgs/community/discussions/26698
+- Biome migration guide for 2026: https://dev.to/pockit_tools/biome-the-eslint-and-prettier-killer-complete-migration-guide-for-2026-27m
+- Biome Git Hooks recipe: https://biomejs.dev/recipes/git-hooks/
+- Biome Roadmap 2026: https://biomejs.dev/blog/roadmap-2026/
+- YAML security risks (Kusari): https://www.kusari.dev/learning-center/yaml-security
+- Vector env var interpolation (newline rejection): https://vector.dev/docs/reference/environment_variables/
+- SuperGhost codebase analysis: `src/cli.ts`, `src/output/reporter.ts`, `src/output/types.ts`, `src/runner/types.ts`, `src/config/loader.ts`, `src/config/schema.ts`
 
 ---
-*Pitfalls research for: SuperGhost v0.2 DX Polish + Reliability Hardening*
-*Researched: 2026-03-11*
+*Pitfalls research for: SuperGhost v0.3 CI/CD + Team Readiness*
+*Researched: 2026-03-12*

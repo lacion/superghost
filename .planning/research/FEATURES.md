@@ -1,259 +1,535 @@
 # Feature Research
 
-**Domain:** AI-powered E2E browser + API testing CLI tool — DX Polish (v0.2)
-**Researched:** 2026-03-11
-**Confidence:** HIGH (competitor CLIs inspected via official docs; existing codebase read directly; UX conventions verified across Jest, Vitest, Playwright, Cypress)
+**Domain:** CI/CD output formats, code quality enforcement, contributor readiness, and config interpolation for AI-powered E2E testing CLI (v0.3)
+**Researched:** 2026-03-12
+**Confidence:** HIGH (JUnit XML format spec verified against testmoapp/junitxml, Biome v2 docs verified, GitHub Actions patterns verified, env var interpolation conventions verified against Docker Compose spec, JSON output conventions verified against Jest/Vitest docs)
 
 ---
 
 ## Context: What This File Is
 
-This FEATURES.md is an **addendum** for the v0.2 milestone. v1.0 features are already implemented and documented in the previous research file. This file focuses exclusively on the five DX polish features in the current milestone:
+This FEATURES.md covers the **v0.3 CI/CD + Team Readiness** milestone. The v1.0 core (AI agent, browser automation, caching) and v0.2 DX polish (CLI flags, preflight, verbose, exit codes) are already shipped. This file focuses exclusively on the six new features:
 
-1. CLI flags: `--dry-run`, `--verbose`, `--no-cache`, `--only <pattern>`
-2. Preflight `baseUrl` reachability check
-3. Real-time step progress output during AI execution
-4. Distinct exit codes: 0 = pass, 1 = test failure, 2 = config/runtime error
-5. Cache key normalization (whitespace/formatting-insensitive)
+1. JSON output format (`--output json`)
+2. JUnit XML output format (`--output junit`)
+3. Linting/formatting enforcement (Biome)
+4. GitHub Actions PR workflow with test gates
+5. Contributor docs (CONTRIBUTING.md, issue/PR templates, SECURITY.md)
+6. Env var interpolation in YAML configs (`${VAR}` syntax)
+
+**Existing capabilities this builds on:**
+- All output already routes to stderr via `writeStderr()` (stdout reserved for structured output)
+- `RunResult` and `TestResult` types carry all needed data for structured output
+- `Reporter` interface supports pluggable output (`onTestStart`, `onTestComplete`, `onRunComplete`, `onStepProgress`)
+- Exit codes 0/1/2 already distinguish pass/fail/error
+- Commander.js CLI with `--dry-run`, `--verbose`, `--no-cache`, `--only` flags
+- GitHub Actions workflows exist for E2E (weekly `e2e.yml`) and release (on tag `release.yml`)
+- Bun-native with TypeScript strict mode, 2-space indentation
 
 ---
 
-## Feature Landscape
+## Table Stakes
 
-### Table Stakes (Users Expect These)
-
-These are UX behaviors users of CLI testing tools take for granted. Absence makes SuperGhost feel like a prototype.
+Features that CI/CD users and team adopters expect. Missing any of these makes the tool feel unready for team use.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| `--dry-run` flag (list tests, no execution) | Every serious test CLI has a way to preview what will run without running it. Jest `--listTests`, Playwright `--list`, Vitest `vitest list` all do this. Users expect it for large suites or pipeline debugging. | LOW | Output: numbered list of test names + their type (browser/api). No MCP spawn, no AI call, no cache read. Exit code 0. Works with `--only` filter. |
-| `--verbose` flag (detailed step-level output) | Debugging a failing AI test with only a spinner + final result is opaque. Users need to see what the AI is doing. Playwright `--reporter=verbose`, Jest `--verbose`, Vitest `--reporter=verbose` all increase output fidelity. | MEDIUM | In verbose mode: print each MCP tool call as it happens (tool name + truncated args), print AI model, print cache hit/miss before each test, print full error trace on failure. nanospinner already present — falls back to plain-text line-per-step in verbose mode (spinners conflict with multi-line output). |
-| `--no-cache` flag (bypass all cache) | Docker `docker build --no-cache`, npm `npm ci --no-cache`, Turborepo `--no-cache` — the convention is universal. Users expect this for debugging stale behavior or forcing a fresh AI run. | LOW | Skip `CacheManager.load()` entirely; do not skip `CacheManager.save()` after successful AI run (so the next run re-populates cache). This distinction matters: `--no-cache` means "don't read from cache this run," not "never cache again." |
-| `--only <pattern>` filter (subset of tests) | Jest `-t "pattern"`, Playwright `--grep pattern`, Vitest `-t pattern` — all use a pattern (string or regex) to select which tests run. Users with 20+ tests need this to iterate on one failing test. | LOW | Pattern matches against `test.name` (the display name field in YAML). Substring match is sufficient — no need for full regex unless users request it. Print "Skipping X tests (--only filter)" before running. Exit code 2 if pattern matches zero tests (misconfiguration, not test failure). |
-| Preflight `baseUrl` reachability check | Playwright's `webServer` config pings baseUrl before starting tests. Cypress recommends `wait-on` in CI. Users expect the tool to fail fast with a clear error if the server is down, rather than spending 10+ seconds on AI calls that all fail with connection errors. | LOW | HTTP GET with short timeout (5s). Check once before any tests start. If unreachable: print actionable error (`baseUrl https://... is not reachable — is your server running?`), exit code 2. Skip check if no `baseUrl` configured. |
-| Real-time progress during AI execution | The existing spinner only shows test name. For a 30-second AI run, there is no feedback on what the agent is doing. Playwright shows each step in verbose mode; Vitest shows assertions as they pass. Users feel anxious watching a static spinner for 30s. | MEDIUM | Print each tool call as it happens (before result): `  > navigate(url=...)`, `  > snapshot()`, `  > click(...)`. Requires hooking into the agent's tool execution callback. The Vercel AI SDK `onStepFinish` callback is the right integration point. |
-| Distinct exit code for config errors | POSIX convention: exit 2 = bad usage/invalid arguments. Bash itself uses exit 2. curl uses exit 2 for init failures. Tools that use exit 1 for both test failures and config errors make CI pipelines impossible to instrument (you can't distinguish "tests failed, re-run" from "your pipeline is broken"). | LOW | Currently: `ConfigLoadError` → exit 1. Missing API key → exit 1. Same code as test failure. Change: all pre-execution failures (config load error, missing API key, zero tests matched by filter, baseUrl unreachable) → exit 2. Test failures remain exit 1. |
-| Cache key normalization | A test case written as `"  Check that login  works "` should hit the same cache as `"Check that login works"`. Whitespace differences from copy-paste or editor formatting causing cache misses is a paper-cut that erodes trust. | LOW | Normalize cache key input: `testCase.trim().replace(/\s+/g, ' ')` before hashing. Apply same normalization to `baseUrl` (trim only). Update `CacheManager.hashKey()`. Existing cache entries are compatible if normalized — no migration needed for new entries. |
+| JSON output format (`--output json`) | Every CI tool expects machine-readable output. `jq` piping, dashboard ingestion, custom reporting all require JSON. Jest (`--json`), Vitest (`--reporter=json`), Playwright (`--reporter=json`) all offer it. This is the universal machine-readable format. | LOW | Serialize existing `RunResult` to stdout. `JSON.stringify()` of a mapped structure. ~50-60 lines including the formatter function. Deps on existing types: `RunResult`, `TestResult`. |
+| JUnit XML output format (`--output junit`) | JUnit XML is the universal CI reporting format. GitHub Actions (`dorny/test-reporter`, `mikepenz/action-junit-report`), Jenkins, GitLab CI, Azure DevOps, CircleCI all consume it natively. Without JUnit XML, test results are invisible in CI dashboards. | LOW-MEDIUM | ~80-100 lines including XML escaping. No npm dependency needed -- generate XML string with template literals. The format is simple: `testsuites` > `testsuite` > `testcase` with optional `failure` children. Must XML-escape `&`, `<`, `>`, `"` in names/messages. |
+| Linting/formatting enforcement | Any open-source or team project without automated code style enforcement devolves into style debates in PRs. Contributors expect a lint check to exist. Biome is the standard for Bun/TypeScript in 2025-2026 (single tool, 20-100x faster than ESLint+Prettier). | LOW | Biome setup: one `biome.json` config file, one devDependency (`@biomejs/biome`). One-time format of existing code. ~10 minutes of work. |
+| PR workflow with test gates | Required status checks prevent merging broken code. Without this, lint/format enforcement is advisory only. Standard `pull_request` trigger in GitHub Actions is the universal pattern. | LOW | Single YAML workflow file (`.github/workflows/ci.yml`). Three parallel jobs: lint, test, typecheck. Then configure branch protection in GitHub settings. |
+| Env var interpolation (`${VAR}` in YAML) | CI environments pass secrets and config via env vars. Hardcoding `baseUrl`, API keys, or test credentials in YAML is a security anti-pattern. Docker Compose established `${VAR}` as the de facto standard. | MEDIUM | ~40-60 lines of interpolation logic in config loader, but needs careful regex work, good error messages, and edge case handling (unclosed braces, nested objects/arrays). |
+| Contributor docs | CONTRIBUTING.md is the first file potential contributors look for. Its absence signals the project is not ready for contributions. GitHub surfaces issue/PR templates automatically and calculates community health scores. | LOW | Documentation only, no code changes. 5 files total. |
 
 ---
 
-### Differentiators (Competitive Advantage)
+## Differentiators
 
-Features that are not universal expectations but give SuperGhost a better UX than competitors in specific scenarios.
+Features that set SuperGhost apart from other testing tools in the CI/CD context.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| `--dry-run` combined with `--only` filter | Playwright and Jest support these independently but their interaction is not always well-defined. SuperGhost's dry-run should respect `--only` — show exactly what would run given the current filter. | LOW | Compose naturally: filter tests by pattern first, then list. Prevents "I thought --only would run 3 tests" surprises. |
-| Verbose mode that falls back gracefully in non-TTY | Tools like Jest use raw `console.log` in non-TTY (CI pipes). SuperGhost should detect non-TTY and emit clean, structured lines (no ANSI codes via picocolors auto-disable, no spinner via nanospinner auto-disable). Verbose mode in CI should produce parseable per-step lines. | LOW | Already handled: picocolors disables ANSI when stdout is not a TTY. nanospinner disables animation in non-TTY. The verbose output lines just need to be `console.log` calls. |
-| Preflight error that names the test it would have blocked | Rather than just "baseUrl is unreachable," list which tests were going to use that baseUrl. Helps users understand scope of failure in suites with mixed baseUrls. | MEDIUM | Only worth doing if per-test baseUrl overrides exist (they do — schema supports `test.baseUrl`). Check per-test baseUrls too, not just global. Report unique set of unreachable URLs with count of tests affected. |
-| `--no-cache` re-populates cache after fresh AI run | Most tools treat `--no-cache` as "this run is ephemeral." SuperGhost's cache is a long-term test maintenance artifact. Refreshing it on `--no-cache` runs is correct behavior — you want the cache accurate after a forced fresh run. | LOW | This is an opinionated distinction from Docker/npm. Make it explicit in CLI help text: "Skips reading cache; still writes on success." |
-| Exit code 2 for zero test matches on `--only` | Jest exits 0 if no tests match a pattern (produces a warning). Playwright exits 0 if `--grep` matches nothing. This is silently wrong in CI — your filter regex has a typo and no tests run, pipeline goes green. SuperGhost should exit 2. | LOW | Check: if `--only` is specified and matched tests array is empty → exit 2 with error message. This is the right behavior that tools like Jest get wrong. |
+| Simultaneous human + machine output | Unlike tools that switch between `--reporter=json` (machine only) or default (human only), SuperGhost outputs human-readable spinners/summary on stderr AND structured data on stdout simultaneously. Users see live progress while machines parse results. No "multiple reporters" config needed. | LOW | The stderr/stdout split from v0.2 makes this automatic. `--output json` adds structured stdout without changing stderr behavior. This is architecturally superior to the reporter-switching pattern in Jest/Vitest/Playwright. |
+| JSON output with `version` field | Enables schema evolution. Most test tools dump unversioned JSON and break consumers on updates. Including `version: 1` lets downstream tools handle format changes gracefully. | TRIVIAL | One extra field. Sets a good precedent for forward compatibility. |
+| JUnit XML with SuperGhost-specific `<property>` elements | JUnit `<property>` elements per testcase can carry `source` (cache/ai), `selfHealed` (true/false). CI dashboards that support properties surface this metadata. Unique to AI-driven testing -- no other tool reports cache vs AI execution source. | LOW | Standard JUnit extension point per [testmoapp/junitxml spec](https://github.com/testmoapp/junitxml). Zero compatibility risk. |
+| `${VAR:?error}` required variable syntax | Docker Compose convention for mandatory env vars. Most testing tools either silently leave `${MISSING}` as a literal or substitute empty. Erroring with a clear message on required vars is a genuine DX differentiator for CI pipelines. | LOW | Pattern match in the interpolation regex. Throw `ConfigLoadError` with the user's custom error message. |
+| `${VAR:-default}` default value syntax | Configs work in both local dev (with defaults) and CI (with env var overrides) without modification. Reduces the "works on my machine" problem significantly. | LOW | Pattern match in the interpolation regex. |
+| CI workflow provided out-of-the-box | Most test tools say "configure your own CI." SuperGhost ships with a ready-to-use `ci.yml` covering lint + test + typecheck, plus documented branch protection setup. Lower barrier for team adoption. | LOW | Ship the workflow file + document branch protection in CONTRIBUTING.md. |
 
 ---
 
-### Anti-Features (Commonly Requested, Often Problematic)
+## Anti-Features
 
-Features that seem like natural next steps for this milestone but should be deferred or avoided.
+Features to explicitly NOT build in v0.3.
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| `--watch` mode | "Re-run tests on config change." | Watch mode requires a file watcher loop, signal handling for restart, TTY manipulation for re-draw. This is a separate feature of similar complexity to this entire milestone. | v2 milestone. Use `nodemon --exec "superghost --config tests.yaml"` as a workaround in the meantime. |
-| `--bail` / fail-fast after N failures | Jest `--bail`, Playwright `--max-failures`. Users with 50 tests don't want to wait for all failures. | Bail logic interacts badly with cache — a bailed run leaves the cache partially populated. For a 5-feature DX milestone, bail adds cross-cutting complexity to the runner. | Sequential execution already fails fast implicitly (each test blocks the next). For now, exit 1 after all tests run. |
-| JSON/JUnit output mode (`--output json`) | CI reporting, piping to dashboards. | JSON output is a reporter refactor, not a DX flag. It changes the output contract for all consumers. The current human-readable format already has CI-useful exit codes. | Defer to a "reporting" milestone. The summary box output is already parseable for humans. |
-| Full regex matching for `--only` | "I want complex test selection with lookaheads." | Regex in CLI args causes shell quoting hell. Most users want substring match, not regex. Jest uses `--testNamePattern` with regex but it's frequently misused (users forget to escape). | Substring match covers 95% of use cases. Document clearly. If regex is needed, users can quote patterns appropriately since JavaScript `String.includes()` is the default. |
-| `--clear-cache` as a separate flag | "I want to delete all cached test results." | This is a destructive operation on what may be committed CI artifacts. It's better as a one-time `rm -rf .superghost-cache/` than a built-in flag that could accidentally nuke a shared cache. | Documented in README. `--no-cache` covers the "force fresh run" use case without deleting files. |
-| Preflight check for API test endpoints | "Check if each API baseUrl is reachable." | API tests may use dynamic endpoints or may test error states (intentionally unreachable endpoints). A preflight check on API test URLs would produce false positives. | Only preflight-check `config.baseUrl` (global browser test base). Let per-test API failures surface as test failures with clear error messages. |
-| Token/cost tracking in verbose output | "Show how many tokens this run used." | Requires Vercel AI SDK usage tracking per `generateText` call, plus per-provider cost tables that drift over time. This is a full "observability" feature, not a DX polish item. | Defer. Track `usage.totalTokens` from `generateText` result and surface it post-v0.2. |
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| TAP (Test Anything Protocol) output | TAP has poor adoption in modern CI. GitHub Actions, GitLab, Jenkins all prefer JUnit XML. Adds format complexity with near-zero user demand. Vitest supports it but few use it. | JSON covers programmatic consumption. JUnit XML covers CI dashboards. Two formats is enough. |
+| `--output-file <path>` flag | Adds complexity (file creation, error handling for missing dirs, overwrite semantics). Shell redirection already handles this: `superghost --output junit > results.xml`. | Document stdout redirection in --help and README. |
+| `--output` with multiple formats simultaneously | Complexity explosion (two stdout streams? secondary file?). No CI tool needs both JSON and JUnit at the same time. | Run twice with different `--output` flags if both needed (cached replay makes second run instant). |
+| HTML report output | Scope creep. HTML reports require CSS, templating, and visual design decisions. Not needed for CI/CD. Tools like Allure can consume JUnit XML to generate HTML. | Provide JUnit XML. Let downstream tools generate HTML. |
+| Custom Biome rules or plugins | Biome's recommended rules are comprehensive. Custom rules add maintenance burden and confuse contributors who know Biome defaults. | Use `"recommended": true` and only override specific rules with clear comments in `biome.json`. |
+| E2E tests in PR workflow | E2E tests require API keys (LLM providers), browser binaries, and 30s+ per test. Running them in PR gates blocks PRs on AI provider availability and cost. Non-deterministic by nature. | Keep E2E on existing `workflow_dispatch` + weekly schedule (`e2e.yml`). PR gates: typecheck + lint + unit tests only (fast, free, deterministic). |
+| Built-in `.env` file support | Bun already loads `.env` automatically into `process.env`. Adding explicit `.env` parsing duplicates this and creates precedence confusion (Docker Compose's `.env` support has caused years of confusion). | Document that Bun loads `.env` automatically and `${VAR}` in YAML config reads from `process.env` (which includes `.env` values). |
+| Nested/recursive env var interpolation | `${VAR:-${OTHER_VAR}}` adds parsing complexity and is rarely needed. Docker Compose supports it but most users never use it. | Support flat interpolation only: `${VAR}`, `${VAR:-default}`, `${VAR:?error}`. |
+| `$VAR` unbraced syntax | Too easy to accidentally interpolate. `$HOME` in a test case description should not expand. Requiring braces (`${HOME}`) makes interpolation explicit. | Only support `${VAR}` braced syntax. |
+| `biome check --write` in CI | Auto-fixing in CI masks bad habits and means CI changes code the developer didn't write. CI should fail-fast, not silently rewrite. | `biome ci` in GitHub Actions (read-only, fails on issues). `biome check --write` for local dev only. |
+| Pre-commit hooks (husky/lefthook) as default | Adds install-time complexity, slows commits, creates friction for new contributors. Biome is fast enough that CI catches issues in seconds. | Optional setup instructions in CONTRIBUTING.md. CI is the enforcement mechanism. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[--dry-run flag]
-    └──requires──> [config loader] (must parse YAML to list test names)
-    └──enhances──> [--only filter] (dry-run respects filter, shows what would run)
-    └──conflicts──> [MCP spawn] (dry-run must NOT start Playwright MCP)
+[Biome setup (biome.json + devDep)]
+    |
+    +--enables--> [PR workflow lint job (biome ci .)]
+    +--enables--> [Local dev: biome check --write]
+    +--referenced-by--> [Contributor docs (code style section)]
 
-[--only <pattern> filter]
-    └──requires──> [config loader] (needs test list to filter)
-    └──enhances──> [TestRunner.run()] (runner skips non-matching tests)
-    └──enhances──> [--dry-run] (filter applied before listing)
+[--output <format> CLI flag]
+    |
+    +--enables--> [JSON reporter]
+    +--enables--> [JUnit XML reporter]
 
-[--no-cache flag]
-    └──requires──> [CacheManager] (bypasses CacheManager.load(), keeps CacheManager.save())
-    └──conflicts──> [--dry-run] (dry-run never reads cache either, but for different reason)
+[JSON output format]
+    |
+    +--requires--> [--output flag in CLI]
+    +--reads--> [RunResult / TestResult types]
 
-[--verbose flag]
-    └──requires──> [agent step hooks] (needs onStepStart/onStepFinish callbacks from agent-runner)
-    └──enhances──> [ConsoleReporter] (adds per-step lines between spinner events)
-    └──conflicts──> [nanospinner] (spinner animation must be suppressed in verbose mode — multi-line output breaks spinner redraw)
+[JUnit XML output format]
+    |
+    +--requires--> [--output flag in CLI]
+    +--reads--> [RunResult / TestResult types]
+    +--enables--> [CI test visualization via dorny/test-reporter (future)]
 
-[Preflight baseUrl check]
-    └──requires──> [config loader] (needs baseUrl from config before running)
-    └──requires──> [--dry-run exclusion] (preflight should NOT run in dry-run mode)
-    └──enhances──> [exit code 2] (unreachable baseUrl is a config/runtime error, not a test failure)
+[Env var interpolation]
+    |
+    +--modifies--> [Config loader (after YAML parse, before Zod validation)]
+    +--fully independent of output formats and CI setup
 
-[Real-time step progress]
-    └──requires──> [agent-runner onStepFinish hook] (needs callback from executeAgent)
-    └──requires──> [--verbose flag] (only visible in verbose mode; default mode keeps spinner-only)
-    └──enhances──> [ConsoleReporter] (reporter needs a new onStepComplete(step) method)
+[PR workflow (ci.yml)]
+    |
+    +--requires--> [Biome setup] (lint job runs biome ci)
+    +--uses--> [existing bun test + tsc --noEmit]
 
-[Exit code 2 for config errors]
-    └──requires──> [ConfigLoadError distinction] (already thrown, needs different exit path)
-    └──enhances──> [preflight check] (unreachable URL exits 2, not 1)
-    └──enhances──> [--only with zero matches] (zero match is exit 2)
-
-[Cache key normalization]
-    └──requires──> [CacheManager.hashKey()] (normalize input before hashing)
-    └──no conflicts] (pure function change; cache entries with old keys become orphaned but not incorrect)
+[Contributor docs]
+    |
+    +--references--> [Biome setup] (code style section)
+    +--references--> [PR workflow] (CI section)
+    +--should be written LAST (references all other features)
 ```
 
 ### Dependency Notes
 
-- **`--verbose` conflicts with nanospinner:** The current `ConsoleReporter` uses nanospinner for a per-test spinner. Spinners work by overwriting the current terminal line. If verbose mode prints multiple lines per test, the spinner will corrupt the output. Solution: when `--verbose` is active, skip spinner creation and use `console.log` with a prefix symbol instead.
-
-- **Real-time step progress requires agent hook:** The `executeAgent` function in `agent-runner.ts` currently runs a full `generateText` call. To emit per-step output, the `onStepFinish` callback in Vercel AI SDK must be used. This callback fires after each AI "step" (tool call + result cycle). The callback signature is `onStepFinish({ toolCalls, toolResults })`.
-
-- **Preflight must not run in dry-run mode:** `--dry-run` is supposed to be safe to run without a server. Preflight check must be conditional on actual execution mode.
-
-- **`--only` zero-match → exit 2, not 1:** This is counterintuitive (it feels like "nothing failed"), but exit 2 is correct because it signals a usage/configuration error — the user passed a pattern that matches nothing, which is almost certainly a mistake. Exit 1 reserved for actual test failures.
-
-- **Cache key normalization is non-breaking:** Existing cache files are keyed by the old (non-normalized) hash. When normalization is applied, old keys become unreachable. The effect is a one-time cold start for any test whose key changes. Self-healing handles this transparently — the AI re-runs and saves under the new normalized key.
+- **`--output` flag must exist before either reporter:** Both JSON and JUnit formatters are invoked via the same `--output <format>` flag. Build the flag infrastructure first (Commander option + validation), then add formatters.
+- **PR workflow requires Biome setup:** The lint job runs `biome ci .`, which requires `biome.json` and `@biomejs/biome` devDependency. Build Biome setup before the CI workflow.
+- **Contributor docs reference everything:** CONTRIBUTING.md describes setup, linting, testing, and CI. Write it after all tooling is configured so docs match reality.
+- **JSON and JUnit XML are independent of each other:** Both read from `RunResult` and write to stdout. They share the `--output` flag but have no code dependency on each other. Can be built in either order.
+- **Env var interpolation is fully independent:** Operates in the config loader layer, before any test execution. No dependency on output formats, CI setup, or linting.
 
 ---
 
-## v0.2 Milestone Scope
+## Detailed Feature Specifications
 
-### Build Now (v0.2)
+### 1. JSON Output Format
 
-These are the five feature areas in the current milestone. All are LOW–MEDIUM complexity and compose cleanly with the existing architecture.
+**Convention (HIGH confidence):** Follow the Jest/Vitest JSON output convention. Output a single JSON object to stdout after all tests complete. Vitest explicitly states its JSON reporter generates "a report of test results in JSON format" to stdout.
 
-- [ ] `--dry-run` flag — List tests that would run, exit 0. Works with `--only`. Does NOT start MCP, does NOT read cache.
-- [ ] `--verbose` flag — Per-step tool call output during AI execution. Suppresses nanospinner. Uses `onStepFinish` callback from Vercel AI SDK.
-- [ ] `--no-cache` flag — Bypasses `CacheManager.load()`, keeps `CacheManager.save()`. Self-documents: "skips reading cache; still writes on success."
-- [ ] `--only <pattern>` filter — Substring match on `test.name`. Exit 2 if no tests match. Print skipped-test count at run start.
-- [ ] Preflight `baseUrl` HTTP check — GET request with 5s timeout before any test runs. Exit 2 if unreachable. Skip in `--dry-run` mode. Check per-test baseUrls that differ from global.
-- [ ] Real-time step progress — Print `  > toolName(truncated_args)` for each AI step. Gated on `--verbose`. Integrated via `onStepFinish` in agent-runner.
-- [ ] Exit codes 0/1/2 — 0 = all pass, 1 = any test fails, 2 = config error / missing API key / unreachable baseUrl / zero tests matched by filter.
-- [ ] Cache key normalization — `testCase.trim().replace(/\s+/g, ' ')` before SHA-256 hash in `CacheManager.hashKey()`.
+**Expected schema:**
+```json
+{
+  "version": 1,
+  "success": true,
+  "summary": {
+    "tests": 5,
+    "passed": 4,
+    "failed": 1,
+    "skipped": 0,
+    "cached": 3,
+    "duration": 12450
+  },
+  "results": [
+    {
+      "name": "Login flow",
+      "case": "Navigate to /login, enter credentials, verify dashboard",
+      "status": "passed",
+      "source": "cache",
+      "duration": 150,
+      "selfHealed": false
+    },
+    {
+      "name": "Checkout flow",
+      "case": "Add item to cart, proceed to checkout",
+      "status": "failed",
+      "source": "ai",
+      "duration": 8500,
+      "selfHealed": false,
+      "error": "Timeout: checkout button not found within 60s"
+    }
+  ]
+}
+```
 
-### Defer to Later Milestones
+**Key conventions:**
+- Single JSON object, not NDJSON. Entire output is one valid JSON blob.
+- `version: 1` (integer) at top level for schema evolution.
+- `success: boolean` at top level for quick pass/fail check (`jq '.success'`).
+- `duration` in milliseconds (integer), not seconds. Matches existing `durationMs` fields.
+- `error` field only present on failed tests (omitted, not null).
+- `selfHealed` always present (boolean) for consistency.
+- Human output continues on stderr simultaneously.
+- Pipe-friendly: `superghost -c tests.yaml --output json | jq '.results[] | select(.status == "failed")'`
 
-- [ ] `--watch` mode — v3 or later (separate feature of comparable complexity to v0.2)
-- [ ] `--bail` / fail-fast — v0.3 or later (cross-cuts runner + cache lifecycle)
-- [ ] JSON/JUnit output — "Reporting" milestone (reporter refactor)
-- [ ] Token/cost tracking — "Observability" milestone
+**Implementation notes:**
+- Create `src/output/json-formatter.ts` with `formatJson(result: RunResult, version: string): string`.
+- Map `RunResult` to JSON schema: add `version`, `success` (derived from `failed === 0`), rename `durationMs` to `duration`.
+- Call from `cli.ts` after `runner.run()`, write to `process.stdout`.
+
+### 2. JUnit XML Output Format
+
+**Convention (HIGH confidence):** Follow the de facto JUnit XML standard documented at [testmoapp/junitxml](https://github.com/testmoapp/junitxml). No official spec exists, but GitHub Actions, GitLab, and Jenkins agree on the core structure.
+
+**Expected output:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="superghost" tests="5" failures="1" errors="0"
+            skipped="0" time="12.450"
+            timestamp="2026-03-12T15:48:23">
+  <testsuite name="superghost" tests="5" failures="1" errors="0"
+             skipped="0" time="12.450"
+             timestamp="2026-03-12T15:48:23">
+    <testcase name="Login flow" classname="superghost" time="0.150">
+      <properties>
+        <property name="source" value="cache" />
+        <property name="selfHealed" value="false" />
+      </properties>
+    </testcase>
+    <testcase name="Checkout flow" classname="superghost" time="8.500">
+      <properties>
+        <property name="source" value="ai" />
+        <property name="selfHealed" value="false" />
+      </properties>
+      <failure message="Timeout: checkout button not found within 60s"
+               type="TestFailure">Timeout: checkout button not found within 60s</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+```
+
+**Key conventions:**
+- `time` is in **seconds** (decimal), not milliseconds. This JUnit convention differs from JSON format. Convert: `durationMs / 1000` with 3 decimal places.
+- `classname` is "superghost" for all tests (single suite, flat structure).
+- `<failure>` for test failures. Both `message` attribute and text content carry the error message.
+- `type` attribute on `<failure>` is "TestFailure" (generic -- SuperGhost doesn't distinguish assertion types).
+- `timestamp` in ISO 8601 format (e.g., `2026-03-12T15:48:23`).
+- `errors="0"` always -- config errors abort before XML generation, so `<error>` elements are never produced.
+- `<properties>` per testcase carry SuperGhost-specific metadata: `source` (cache/ai), `selfHealed` (true/false).
+- Must XML-escape 5 characters in all attribute values and text content: `&` -> `&amp;`, `<` -> `&lt;`, `>` -> `&gt;`, `"` -> `&quot;`, `'` -> `&apos;`.
+- No external dependency. Template literals are sufficient.
+
+**Implementation notes:**
+- Create `src/output/junit-formatter.ts` with `formatJunitXml(result: RunResult): string`.
+- Helper function `escapeXml(str: string): string` for the 5 special characters.
+- Call from `cli.ts` after `runner.run()`, write to `process.stdout`.
+
+**CI integration example (for docs/README):**
+```yaml
+- name: Run SuperGhost tests
+  run: superghost -c tests.yaml --output junit > test-results.xml
+  if: always()
+
+- uses: dorny/test-reporter@v2
+  if: always()
+  with:
+    name: SuperGhost Tests
+    path: test-results.xml
+    reporter: java-junit
+```
+
+### 3. The `--output` CLI Flag
+
+**Convention (MEDIUM confidence):** Most tools use `--reporter` for this, but SuperGhost's design is different. The human reporter always runs on stderr. `--output` adds structured output on stdout. This is additive behavior, not a reporter switch.
+
+**Usage:**
+```bash
+superghost -c tests.yaml --output json    # JSON on stdout + human on stderr
+superghost -c tests.yaml --output junit   # JUnit XML on stdout + human on stderr
+superghost -c tests.yaml                  # human only on stderr, stdout empty
+```
+
+**Commander.js:**
+```typescript
+.option('--output <format>', 'Structured output format: json, junit')
+```
+
+**Validation:** If `--output` is provided with unsupported value, exit 2 with: `Error: Unknown output format "foo". Supported: json, junit`.
+
+### 4. Biome Linting/Formatting
+
+**Convention (HIGH confidence):** Biome v2.x is the standard linter/formatter for Bun-native TypeScript projects in 2025-2026. Single tool replaces ESLint + Prettier, 20-100x faster.
+
+**Setup steps:**
+1. `bun add --dev --exact @biomejs/biome`
+2. Create `biome.json` (see below)
+3. Run `biome check --write .` once to format all existing code
+4. Commit formatted code as standalone "chore: format codebase with biome" commit
+5. Add scripts to `package.json`
+
+**Recommended `biome.json`:**
+```json
+{
+  "$schema": "https://biomejs.dev/schemas/2.0.0/schema.json",
+  "organizeImports": { "enabled": true },
+  "linter": {
+    "enabled": true,
+    "rules": { "recommended": true }
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "files": {
+    "ignore": [
+      "dist/",
+      ".superghost-cache/",
+      "node_modules/"
+    ]
+  }
+}
+```
+
+**Note on indent style:** Existing codebase uses 2-space indentation (verified in all `.ts` files). Configure Biome to match: `"indentStyle": "space"`, `"indentWidth": 2`.
+
+**Package.json scripts:**
+```json
+{
+  "lint": "biome check .",
+  "lint:fix": "biome check --write .",
+  "format": "biome format --write ."
+}
+```
+
+**CI command:** `biome ci .` -- read-only mode, exits non-zero on any lint or format issue. This is the CI-appropriate command (not `biome check` which implies `--write` is available).
+
+### 5. PR Workflow (GitHub Actions)
+
+**Convention (HIGH confidence):** Standard `pull_request` trigger with independent parallel jobs.
+
+**Recommended `.github/workflows/ci.yml`:**
+```yaml
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bunx @biomejs/biome ci .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun test
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bunx tsc --noEmit
+```
+
+**Key decisions:**
+- **Three independent parallel jobs**, not sequential. All run simultaneously. If lint fails, test still runs. All issues visible at once. Faster total CI time.
+- **No E2E in PR gate.** E2E requires `ANTHROPIC_API_KEY` secret and is slow + non-deterministic. Stays on `workflow_dispatch` + weekly schedule in existing `e2e.yml`.
+- **Trigger on both `pull_request` and `push` to `main`** -- catches force-pushes and direct commits.
+- **No `bun-version` pin** in setup-bun -- let it use latest stable. Only pin if compatibility issues arise.
+- **After creating workflow:** Configure branch protection in Settings > Branches > main > Require status checks to pass before merging > select `lint`, `test`, `typecheck`.
+
+### 6. Env Var Interpolation
+
+**Convention (MEDIUM confidence):** Follow Docker Compose's interpolation syntax -- the most widely-recognized `${VAR}` convention. Implement a useful subset.
+
+**Supported syntax:**
+
+| Syntax | Behavior | Example |
+|--------|----------|---------|
+| `${VAR}` | Replace with env var value. Empty string if unset. | `baseUrl: ${BASE_URL}` |
+| `${VAR:-default}` | Use env var if set and non-empty, otherwise use default value. | `baseUrl: ${BASE_URL:-http://localhost:3000}` |
+| `${VAR:?error msg}` | Use env var if set and non-empty, otherwise fail with clear error. | `baseUrl: ${BASE_URL:?BASE_URL is required}` |
+| `$$` | Literal `$` character (escape sequence). | `case: "Check price is $$9.99"` |
+
+**NOT supported (intentional omissions):**
+- `$VAR` (unbraced) -- too easy to accidentally interpolate. Braces make intent explicit.
+- `${VAR-default}` (without colon) -- the subtle "unset vs empty" distinction causes confusion. Only support `:-` which treats empty same as unset.
+- `${VAR:+replacement}` (alternative value) -- rarely useful in test configs.
+- `${VAR:-${OTHER}}` (nested interpolation) -- too complex for a test config tool.
+
+**Implementation approach:**
+1. Runs in config loader, after YAML parsing, before Zod validation.
+2. Recursive function that walks all string values in the parsed object (handles nested objects and arrays).
+3. Regex: `/\$\$|\$\{([^}]+)\}/g` to match escaped `$$` or `${...}` expressions.
+4. For each `${...}` match, parse expression:
+   - Contains `:-` -> split on first `:-`, var name + default value.
+   - Contains `:?` -> split on first `:?`, var name + error message.
+   - Otherwise -> entire content is var name.
+5. Look up `process.env[varName]`.
+6. Apply substitution per syntax table.
+7. `$$` becomes literal `$`.
+
+**Error handling:**
+- `${VAR:?msg}` when VAR unset/empty: throw `ConfigLoadError("Environment variable VAR is not set: msg")`.
+- Unclosed brace (`${VAR` without `}`): throw `ConfigLoadError` with helpful message.
+- `${VAR}` when VAR is unset: substitute empty string silently (matches Docker Compose behavior).
+
+**Note on Bun's `.env` loading:** Bun automatically loads `.env` files into `process.env` at startup. This means `${VAR}` in YAML configs automatically reads from `.env` without SuperGhost doing anything special. Document this behavior rather than building `.env` loading.
+
+### 7. Contributor Docs
+
+**Convention (HIGH confidence):** Standard GitHub community health files.
+
+**Files to create:**
+
+1. **`CONTRIBUTING.md`** (root):
+   - Prerequisites: Bun >= 1.2.0
+   - Setup: `git clone`, `bun install`
+   - Running tests: `bun test`, `bun run typecheck`
+   - Code style: Biome enforced. Run `bun run lint:fix` before committing.
+   - Commit conventions (conventional commits or project style based on git log)
+   - PR process: fork, branch, PR against `main`, CI must pass
+   - Directory structure overview
+   - Optional: local pre-commit hook setup with Biome
+
+2. **`SECURITY.md`** (root):
+   - "Do NOT open public issues for security vulnerabilities."
+   - Contact method (email or GitHub private vulnerability reporting)
+   - Response time commitment (48 hours to acknowledge)
+   - Supported versions (current major only)
+
+3. **`.github/ISSUE_TEMPLATE/bug_report.yml`** (YAML-based form):
+   - Description (required)
+   - Steps to reproduce (required)
+   - Expected vs actual behavior (required)
+   - SuperGhost version (`superghost --version`)
+   - OS and Bun version
+   - Config file snippet (sanitized, optional)
+   - Error output/logs (optional)
+
+4. **`.github/ISSUE_TEMPLATE/feature_request.yml`** (YAML-based form):
+   - Problem description (required)
+   - Proposed solution (optional)
+   - Alternatives considered (optional)
+   - Use case context (required)
+
+5. **`.github/PULL_REQUEST_TEMPLATE.md`**:
+   - Description of changes
+   - Related issue (if any)
+   - Checklist: tests added/updated, `bun run lint` passes, `bun test` passes, `bun run typecheck` passes
+
+---
+
+## MVP Recommendation
+
+### Build Order for v0.3
+
+1. **Biome + linting setup** -- foundational code quality gate. Every subsequent commit benefits. Set up first so all v0.3 code is lint-clean from the start.
+
+2. **`--output` flag + JSON formatter** -- simpler format first. Establishes the flag infrastructure that JUnit also uses. JSON is straightforward serialization of existing types.
+
+3. **JUnit XML formatter** -- more complex format, same `--output` flag. Build after JSON so the flag pattern is proven.
+
+4. **Env var interpolation** -- independent feature. Implement after output formats so the interpolation code itself is lint-clean.
+
+5. **GitHub Actions PR workflow** -- depends on Biome being set up and lint commands existing. Wire after tools it calls are in place.
+
+6. **Contributor docs** -- last, because they document everything built in steps 1-5.
+
+### Defer to v0.4+
+
+- `--output-file <path>` flag -- only if users request (shell redirect suffices)
+- `dorny/test-reporter` integration in ci.yml -- once JUnit XML exists, easy enhancement
+- TAP output format -- only if specifically requested
+- Watch mode + re-run on config changes
+- Cost/token tracking per test run
+
+### Out of Scope (Confirmed)
+
+- HTML reports -- dedicated tools do it better
+- Built-in `.env` loading -- Bun handles it, avoid precedence confusion
+- Pre-commit hooks as default -- optional, documented in CONTRIBUTING.md
+- E2E tests in PR gate -- expensive, flaky, keep on schedule
+- Multiple simultaneous output formats
 
 ---
 
 ## Feature Prioritization Matrix
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Exit codes 0/1/2 | HIGH | LOW | P1 — changes 3 lines in cli.ts |
-| Cache key normalization | MEDIUM | LOW | P1 — changes 1 function in cache-manager.ts |
-| `--no-cache` flag | HIGH | LOW | P1 — one boolean in TestExecutor.execute() |
-| `--only <pattern>` filter | HIGH | LOW | P1 — filter before TestRunner.run() |
-| `--dry-run` flag | HIGH | LOW | P1 — list tests and exit before MCP spawn |
-| Preflight `baseUrl` check | HIGH | LOW | P1 — single HTTP GET before test loop |
-| Real-time step progress | MEDIUM | MEDIUM | P2 — requires agent hook integration |
-| `--verbose` with suppressed spinner | MEDIUM | MEDIUM | P2 — reporter mode switch + verbose lines |
+| Feature | User Value | Implementation Cost | Priority | Rationale |
+|---------|------------|---------------------|----------|-----------|
+| Biome setup | HIGH | LOW | P1 | Foundation for PR workflow. One-time setup, permanent benefit. Must come before ci.yml. |
+| JSON output | HIGH | LOW | P1 | Unblocks all programmatic consumption. `RunResult` maps directly to schema. |
+| JUnit XML output | HIGH | LOW-MEDIUM | P1 | Required for CI test visualization. Primary reason teams want structured output. |
+| PR workflow (ci.yml) | HIGH | LOW | P1 | Depends on Biome. Without this, no quality gate on PRs. |
+| Env var interpolation | MEDIUM | MEDIUM | P2 | Important for real-world configs but not blocking CI adoption. Needs careful regex/error work. |
+| Contributor docs | MEDIUM | LOW | P2 | Important for open-source health but not blocking functionality. Write last. |
 
 **Priority key:**
-- P1: Implement first, independent of other P1 features
-- P2: Implement after P1 features are wired; depends on P1 reporter and agent hook work
+- P1: Build first -- enables CI pipeline and team adoption
+- P2: Build second -- enhances usability and contributor experience
 
 ---
 
-## Competitor CLI Behavior Reference
+## Competitor Feature Analysis
 
-This table documents the exact behaviors used as reference for SuperGhost's v0.2 DX conventions. These are verified against official documentation.
+| Feature | Jest | Vitest | Playwright Test | SuperGhost (v0.3 plan) |
+|---------|------|--------|-----------------|------------------------|
+| JSON output | `--json` flag, stdout, human on stderr | `--reporter=json`, stdout or file | `--reporter=json`, file only | `--output json`, stdout (stderr for human always) |
+| JUnit XML | Via `jest-junit` npm package (external) | `--reporter=junit`, built-in | `--reporter=junit`, built-in | `--output junit`, built-in, no dependency |
+| Env vars in config | N/A (JS config files) | N/A (JS config files) | N/A (JS config files) | `${VAR}` in YAML, Docker Compose syntax |
+| Linting tool | ESLint + Prettier (common) | ESLint or Biome | ESLint + Prettier (common) | Biome (single tool, fastest) |
+| PR gate template | User-configured | User-configured | User-configured | Ships with ci.yml + branch protection docs |
+| Multiple reporters | Yes (array config) | Yes (array config) | Yes (array config) | One `--output` at a time (human always on stderr) |
+| Simultaneous human + machine output | No (switches modes) | No (switches modes) | No (switches modes) | **Yes** (stderr=human, stdout=machine, always) |
 
-| Behavior | Jest | Playwright | Vitest | Cypress | SuperGhost v0.2 |
-|----------|------|------------|--------|---------|-----------------|
-| Dry-run / list | `--listTests` (file names only, exits 0) | `--list` (test names + file, exits 0) | `vitest list` (test names, exits 0) | No built-in | `--dry-run`: test names + type, exits 0 |
-| Verbose output | `--verbose` (full test tree hierarchy) | `--reporter=verbose` (per-test steps) | `--reporter=verbose` (per-test output) | No `--verbose`; use `--reporter` | `--verbose`: per-step AI tool calls |
-| Test filtering | `-t "pattern"` (regex on test name) | `--grep pattern` (regex) | `-t pattern` (regex) | `--spec glob` (file-level) | `--only pattern` (substring on test.name) |
-| Cache bypass | N/A (Jest has no step cache) | N/A | N/A | N/A | `--no-cache` (skip read, keep write) |
-| Exit: all pass | 0 | 0 | 0 | 0 | 0 |
-| Exit: test failure | 1 | 1 | 1 | N (number of failures, or 1 with `--posix-exit-codes`) | 1 |
-| Exit: config error | 1 (same as test failure) | 1 | 1 | 1 | **2** (distinct from test failure) |
-| Exit: no tests match filter | 0 (warning printed) | 0 | 0 | 1 | **2** (explicit misconfiguration signal) |
-| Server/preflight check | No | `webServer` option with ping-until-ready | No | `wait-on` pattern (external) | Preflight GET before test loop |
-| Progress during execution | Spinner per test | Step counter per test | Progress bar | Per-test spinner | Per-step tool calls in verbose mode |
-| Non-TTY output | Plain text, no spinner | Plain text | Plain text | Plain text | Auto-detected via picocolors/nanospinner |
-
-**Key divergence from convention:** SuperGhost uses `--only` instead of `--grep`/`-t` because:
-1. SuperGhost test "names" are human-written display names, not function-call identifiers. Substring match (`includes`) is more appropriate than regex for natural-language names.
-2. `--grep` implies regex, which causes shell quoting friction. `--only` is explicit about its purpose.
-3. If users need regex they can always write a regex that works as a substring match (e.g., `--only "login"`).
-
-**Key divergence from convention:** Exit code 2 for zero-match `--only` filter. Jest and Playwright exit 0 for empty filter results. This is a known footgun — green pipelines when your filter typo matches nothing. SuperGhost takes the stricter, more correct position.
-
----
-
-## Implementation Notes for Roadmap
-
-### cli.ts Changes (Low Risk)
-
-`cli.ts` is the integration point for all five flags. The Commander.js program definition gets four new options:
-- `.option('--dry-run', 'List tests without executing')`
-- `.option('--verbose', 'Show AI step-level output during execution')`
-- `.option('--no-cache', 'Skip cache reads (still writes on AI success)')`
-- `.option('--only <pattern>', 'Only run tests matching pattern (substring)')`
-
-The options object propagates through to TestRunner and TestExecutor.
-
-### Agent Hook Integration (MEDIUM Risk)
-
-`agent-runner.ts` calls `generateText` from Vercel AI SDK. The `onStepFinish` callback is the correct hook for per-step progress. The callback receives `{ toolCalls: ToolCall[], toolResults: ToolResult[], stepType }`. This needs to be passed into `executeAgent` as an optional callback.
-
-Signature change: `executeAgent(config: { ..., onStepFinish?: (step: StepInfo) => void })`
-
-ConsoleReporter gets a new optional method: `onAgentStep(testName: string, toolName: string, truncatedArgs: string): void`
-
-### Exit Code Changes (Low Risk)
-
-Current: `process.exit(1)` for both test failures and config errors.
-
-Change: introduce an `ExitCode` enum or constants:
-```typescript
-const EXIT = { PASS: 0, TEST_FAIL: 1, ERROR: 2 } as const;
-```
-
-Apply `EXIT.ERROR` to: `ConfigLoadError`, missing API key, baseUrl unreachable, zero tests matched by `--only`.
-
-Apply `EXIT.TEST_FAIL` to: `result.failed > 0`.
-
-### Cache Manager Change (Low Risk)
-
-One-line change in `CacheManager.hashKey()`:
-```typescript
-static hashKey(testCase: string, baseUrl: string): string {
-  const normalizedCase = testCase.trim().replace(/\s+/g, ' ');
-  const normalizedUrl = baseUrl.trim();
-  const input = `${normalizedCase}|${normalizedUrl}`;
-  // ... rest unchanged
-}
-```
+**SuperGhost advantage:** The stderr/stdout split means users always get human-readable output AND structured output simultaneously without configuration. This is architecturally cleaner than the reporter-switching pattern used by Jest/Vitest/Playwright.
 
 ---
 
 ## Sources
 
-- [Jest CLI Options (official)](https://jestjs.io/docs/cli) — `--listTests`, `--verbose`, `--testNamePattern`, exit codes
-- [Playwright CLI reference (official)](https://playwright.dev/docs/test-cli) — `--list`, `--grep`, `--dry-run`, `--reporter`
-- [Vitest CLI reference (official)](https://vitest.dev/guide/cli) — `vitest list`, `--reporter=verbose`, `-t pattern`
-- [Cypress CLI reference (official)](https://docs.cypress.io/app/references/command-line) — `--spec`, exit codes (0, n failures, 1), `--posix-exit-codes`
-- [Evil Martians CLI UX best practices](https://evilmartians.com/chronicles/cli-ux-best-practices-3-patterns-for-improving-progress-displays) — spinner vs X-of-Y vs progress bar; TTY-compatible output
-- [POSIX exit code conventions](https://www.gnu.org/s/libc/manual/html_node/Exit-Status.html) — 0 = success, 1 = failure, 2 = usage error
-- [Playwright webServer preflight behavior](https://playwright.dev/docs/test-webserver) — ping-until-ready pattern before test start
-- [nanospinner (npm)](https://www.npmjs.com/package/nanospinner) — already in use; auto-disables in non-TTY
-- [picocolors (npm)](https://www.npmjs.com/package/picocolors) — already in use; auto-disables ANSI in non-TTY
-- Existing codebase: `src/cli.ts`, `src/output/reporter.ts`, `src/runner/test-runner.ts`, `src/cache/cache-manager.ts`, `src/runner/test-executor.ts`
+- [Vitest Reporters Documentation](https://vitest.dev/guide/reporters) -- JSON and JUnit reporter conventions, output structure
+- [Jest CLI Options](https://jestjs.io/docs/cli) -- `--json` flag behavior, stderr for human output
+- [testmoapp/junitxml](https://github.com/testmoapp/junitxml) -- JUnit XML format specification, all element attributes, examples
+- [JUnit XML reporting format (LLG)](https://llg.cubic.org/docs/junit/) -- Jenkins-compatible JUnit XML reference
+- [JUnit-Schema/JUnit.xsd](https://github.com/windyroad/JUnit-Schema/blob/master/JUnit.xsd) -- XML Schema definition
+- [Docker Compose Variable Interpolation](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/) -- `${VAR:-default}`, `${VAR:?error}`, escaping syntax
+- [Biome GitHub Repository](https://github.com/biomejs/biome) -- Linter/formatter, installation, v2 features
+- [Biome CLI Reference](https://biomejs.dev/reference/cli/) -- `biome ci` vs `biome check` distinction
+- [Biome Linter Documentation](https://biomejs.dev/linter/) -- Rule configuration, recommended ruleset
+- [dorny/test-reporter](https://github.com/dorny/test-reporter) -- GitHub Actions JUnit XML visualization
+- [mikepenz/action-junit-report](https://github.com/mikepenz/action-junit-report) -- Alternative JUnit XML GitHub Action
+- [GitHub Docs: Issue and PR Templates](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/about-issue-and-pull-request-templates) -- YAML-based form templates
+- [GitHub Docs: Required Status Checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks) -- PR gate configuration
+- [CONTRIBUTING.md Best Practices](https://contributing.md/how-to-build-contributing-md/) -- Contributor docs conventions
+- [GitHub Docs: Community Health Files](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/creating-a-default-community-health-file) -- SECURITY.md, CONTRIBUTING.md placement
+- [oven-sh/setup-bun](https://github.com/oven-sh/setup-bun) -- v2, Bun CI setup action
 
 ---
 
-*Feature research for: SuperGhost v0.2 DX Polish + Reliability Hardening*
-*Researched: 2026-03-11*
+*Feature research for: SuperGhost v0.3 -- CI/CD + Team Readiness*
+*Researched: 2026-03-12*
