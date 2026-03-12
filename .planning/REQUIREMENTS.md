@@ -39,10 +39,10 @@ Requirements for v0.3 CI/CD + Team Readiness. Each maps to roadmap phases.
 
 ### Output Formats
 
-- [ ] **OUT-01**: User can run `--output json` to get machine-readable JSON results on stdout with `version`, `success`, and full test results
+- [x] **OUT-01**: User can run `--output json` to get machine-readable JSON results on stdout with `version`, `success`, and full test results
 - [ ] **OUT-02**: User can run `--output junit` to get JUnit XML on stdout with `classname` attribute and `time` in seconds
-- [ ] **OUT-03**: Human-readable progress on stderr runs simultaneously with structured output on stdout (no mode switching)
-- [ ] **OUT-04**: Commander.js help/version output is redirected to stderr so it never corrupts structured stdout output
+- [x] **OUT-03**: Human-readable progress on stderr runs simultaneously with structured output on stdout (no mode switching)
+- [x] **OUT-04**: Commander.js help/version output is redirected to stderr so it never corrupts structured stdout output
 - [ ] **OUT-05**: JUnit XML includes `<properties>` per testcase with SuperGhost-specific metadata (source: cache/ai, selfHealed)
 
 ### Config
@@ -117,9 +117,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LINT-01 | Phase 8 (v0.3) | Complete |
 | LINT-02 | Phase 8 (v0.3) | Complete |
 | LINT-03 | Phase 8 (v0.3) | Complete |
-| OUT-01 | Phase 9 (v0.3) | Pending |
-| OUT-03 | Phase 9 (v0.3) | Pending |
-| OUT-04 | Phase 9 (v0.3) | Pending |
+| OUT-01 | Phase 9 (v0.3) | Complete |
+| OUT-03 | Phase 9 (v0.3) | Complete |
+| OUT-04 | Phase 9 (v0.3) | Complete |
 | OUT-02 | Phase 10 (v0.3) | Pending |
 | OUT-05 | Phase 10 (v0.3) | Pending |
 | CFG-01 | Phase 11 (v0.3) | Pending |

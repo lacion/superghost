@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v0.3
 milestone_name: CI/CD + Team Readiness
-status: planning
-stopped_at: Phase 9 context gathered
-last_updated: "2026-03-12T21:16:50.196Z"
-last_activity: 2026-03-12 — Phase 8 Biome Setup complete
+status: executing
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-03-12T21:38:24Z"
+last_activity: 2026-03-12 — Phase 9 JSON Output complete
 progress:
   total_phases: 6
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 17
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 33
 ---
 
 # Project State
@@ -21,29 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
-**Current focus:** Phase 9 — JSON Output (v0.3 CI/CD + Team Readiness)
+**Current focus:** Phase 9 — JSON Output complete (v0.3 CI/CD + Team Readiness)
 
 ## Current Position
 
 Phase: 9 of 13 (JSON Output) — second phase of v0.3
-Plan: 0 of 1 in current phase
-Status: Ready to plan
-Last activity: 2026-03-12 — Phase 8 Biome Setup complete
+Plan: 1 of 1 in current phase (complete)
+Status: Phase 9 complete
+Last activity: 2026-03-12 — Phase 9 JSON Output complete
 
-Progress: [##░░░░░░░░] 17%
+Progress: [####░░░░░░] 33%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1 (v0.3)
+- Total plans completed: 2 (v0.3)
 - Average duration: 4min
-- Total execution time: 4min
+- Total execution time: 8min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 8. Biome Setup | 1/1 | 4min | 4min |
+| 9. JSON Output | 1/1 | 4min | 4min |
 
 *Updated after each plan completion*
 
@@ -62,6 +63,11 @@ Phase 8:
 - (08-01) Applied --unsafe fixes for unused imports and non-null assertions where safe
 - (08-01) 42 noExplicitAny warnings accepted at warn level (not errors)
 
+Phase 9:
+- (09-01) Banner animation redirected to stderr to enforce stdout-reserved invariant
+- (09-01) JSON output uses conditional fields (selfHealed only when true, error only when present)
+- (09-01) Error catch blocks emit valid JSON to stdout before exiting when --output json active
+
 ### Pending Todos
 
 None.
@@ -79,6 +85,6 @@ Research flags for v0.3:
 
 ## Session Continuity
 
-Last session: 2026-03-12T21:16:50.194Z
-Stopped at: Phase 9 context gathered
-Resume file: .planning/phases/09-json-output/09-CONTEXT.md
+Last session: 2026-03-12T21:38:24Z
+Stopped at: Completed 09-01-PLAN.md
+Resume file: .planning/phases/09-json-output/09-01-SUMMARY.md
