@@ -27,9 +27,7 @@
 - [x] **OBS-01**: CLI shows real-time step progress during AI execution (tool call names mapped to human descriptions)
 - [x] **OBS-02**: All progress/spinner output routes to stderr (not stdout), with TTY detection gating ANSI output
 
-## v0.3 Requirements
-
-Requirements for v0.3 CI/CD + Team Readiness. Each maps to roadmap phases.
+## v0.3 Requirements (Complete)
 
 ### Linting & Formatting
 
@@ -37,12 +35,19 @@ Requirements for v0.3 CI/CD + Team Readiness. Each maps to roadmap phases.
 - [x] **LINT-02**: `bun run lint` checks code style and `bun run lint:fix` auto-fixes violations
 - [x] **LINT-03**: All existing code passes Biome checks after initial formatting baseline commit
 
-### Output Formats
+### Output Formats (partial)
 
 - [x] **OUT-01**: User can run `--output json` to get machine-readable JSON results on stdout with `version`, `success`, and full test results
-- [ ] **OUT-02**: User can run `--output junit` to get JUnit XML on stdout with `classname` attribute and `time` in seconds
 - [x] **OUT-03**: Human-readable progress on stderr runs simultaneously with structured output on stdout (no mode switching)
 - [x] **OUT-04**: Commander.js help/version output is redirected to stderr so it never corrupts structured stdout output
+
+## v0.4 Requirements
+
+Requirements for v0.4 CI/CD + Team Readiness (Part 2). Each maps to roadmap phases.
+
+### Output Formats
+
+- [ ] **OUT-02**: User can run `--output junit` to get JUnit XML on stdout with `classname` attribute and `time` in seconds
 - [ ] **OUT-05**: JUnit XML includes `<properties>` per testcase with SuperGhost-specific metadata (source: cache/ai, selfHealed)
 
 ### Config
@@ -69,14 +74,14 @@ Requirements for v0.3 CI/CD + Team Readiness. Each maps to roadmap phases.
 
 Deferred to later milestones. Tracked but not in current roadmap.
 
-### Advanced Execution (v0.4)
+### Advanced Execution (v0.5)
 
 - **EXEC-01**: Parallel test execution
 - **EXEC-02**: Config composition (extends/inherits)
 - **EXEC-03**: `--bail` / fail-fast mode
 - **EXEC-04**: `--watch` mode
 
-### Reporting (v0.5)
+### Reporting (v0.6)
 
 - **RPT-01**: Run history tracking
 - **RPT-02**: Flakiness detection
@@ -96,7 +101,9 @@ Explicitly excluded. Documented to prevent scope creep.
 | ESLint + Prettier | Biome replaces 5+ packages with one; no reason to use ESLint |
 | E2E tests in PR gate | Requires API keys, too slow, non-deterministic; keep on workflow_dispatch |
 | `--watch` mode | Comparable complexity to entire milestone; use `nodemon` interim |
-| Token/cost tracking | Requires per-provider cost tables; defer to v0.5 |
+| Token/cost tracking | Requires per-provider cost tables; defer to v0.6 |
+| `.env` file auto-loading | Ambiguous env precedence; users should set env vars explicitly |
+| Recursive env var expansion | Unnecessary complexity; `${VAR}` references other vars is an anti-pattern |
 
 ## Traceability
 
@@ -120,25 +127,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OUT-01 | Phase 9 (v0.3) | Complete |
 | OUT-03 | Phase 9 (v0.3) | Complete |
 | OUT-04 | Phase 9 (v0.3) | Complete |
-| OUT-02 | Phase 10 (v0.3) | Pending |
-| OUT-05 | Phase 10 (v0.3) | Pending |
-| CFG-01 | Phase 11 (v0.3) | Pending |
-| CFG-02 | Phase 11 (v0.3) | Pending |
-| CFG-03 | Phase 11 (v0.3) | Pending |
-| CFG-04 | Phase 11 (v0.3) | Pending |
-| CI-01 | Phase 12 (v0.3) | Pending |
-| CI-02 | Phase 12 (v0.3) | Pending |
-| CI-03 | Phase 12 (v0.3) | Pending |
-| CONTRIB-01 | Phase 13 (v0.3) | Pending |
-| CONTRIB-02 | Phase 13 (v0.3) | Pending |
-| CONTRIB-03 | Phase 13 (v0.3) | Pending |
-| CONTRIB-04 | Phase 13 (v0.3) | Pending |
+| OUT-02 | Phase 14 (v0.4) | Pending |
+| OUT-05 | Phase 14 (v0.4) | Pending |
+| CFG-01 | Phase 15 (v0.4) | Pending |
+| CFG-02 | Phase 15 (v0.4) | Pending |
+| CFG-03 | Phase 15 (v0.4) | Pending |
+| CFG-04 | Phase 15 (v0.4) | Pending |
+| CI-01 | Phase 16 (v0.4) | Pending |
+| CI-02 | Phase 16 (v0.4) | Pending |
+| CI-03 | Phase 16 (v0.4) | Pending |
+| CONTRIB-01 | Phase 17 (v0.4) | Pending |
+| CONTRIB-02 | Phase 17 (v0.4) | Pending |
+| CONTRIB-03 | Phase 17 (v0.4) | Pending |
+| CONTRIB-04 | Phase 17 (v0.4) | Pending |
 
 **Coverage:**
 - v0.2 requirements: 10 total, 10 complete
-- v0.3 requirements: 19 total, 19 mapped to phases, 0 orphaned
+- v0.3 requirements: 6 total, 6 complete
+- v0.4 requirements: 13 total, 13 mapped to phases, 0 orphaned
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-11*
-*Last updated: 2026-03-12 after v0.3 roadmap creation*
+*Last updated: 2026-03-13 after v0.4 milestone definition*
