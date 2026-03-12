@@ -56,7 +56,7 @@
   2. Each `<testcase>` element includes a `<properties>` block with SuperGhost-specific metadata: `source` (cache or ai) and `selfHealed` (true/false)
   3. Test names and failure messages containing XML-special characters or ANSI escape sequences are properly escaped/stripped so the XML is always parseable
   4. Running `superghost --output junit --dry-run` and error paths produce valid JUnit XML (not plain text), consistent with the JSON output precedent
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
 - [ ] 14-01: JUnit XML formatter with escapeXml, ANSI stripping, classname, properties metadata, and unit tests
