@@ -1,54 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.2
-milestone_name: DX Polish + Reliability Hardening
-status: completed
-stopped_at: Completed 07-02-PLAN.md (Phase 07 complete, Milestone v0.2 complete)
-last_updated: "2026-03-12T13:26:16.646Z"
-last_activity: 2026-03-12 -- Completed plan 07-02 (reporter verbose mode and stderr migration)
+milestone: v0.3
+milestone_name: CI/CD + Team Readiness
+status: not_started
+stopped_at: Defining requirements
+last_updated: "2026-03-12"
+last_activity: 2026-03-12 -- Milestone v0.3 started
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-11)
+See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
-**Current focus:** Milestone v0.2 complete -- all 7 phases and 7 plans executed
+**Current focus:** Milestone v0.3 — CI/CD + Team Readiness
 
 ## Current Position
 
-Phase: 7 of 7 (Observability)
-Plan: 2 of 2 complete
-Status: Complete
-Last activity: 2026-03-12 -- Completed plan 07-02 (reporter verbose mode and stderr migration)
-
-Progress: [██████████] 100%
-
-## Performance Metrics
-
-**Velocity:**
-- Total plans completed: 7 (v0.2)
-- Average duration: 3min
-- Total execution time: 23min
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 04-foundation | 2/2 | 6min | 3min |
-| 05-infrastructure-flags | 2/2 | 6min | 3min |
-| 06-dry-run | 1/1 | 2min | 2min |
-| 07-observability | 2/2 | 9min | 4.5min |
-
-*Updated after each plan completion*
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-12 — Milestone v0.3 started
 
 ## Accumulated Context
 
@@ -81,16 +61,13 @@ None.
 
 ### Blockers/Concerns
 
-Carried forward from v1.0:
+Carried forward from v0.2:
 - OpenRouter model namespace format (`anthropic/claude-3-5-sonnet`) needs integration test
 - Gemini tool call response shape differences need dedicated integration test
 - `bun build --compile` dynamic import limitation — MCP server packages must NOT be bundled into binary
 
-From research:
-- (Resolved) Vercel AI SDK: using `experimental_onToolCallFinish` instead of `onStepFinish` for per-tool-call events
-
 ## Session Continuity
 
-Last session: 2026-03-12T13:20:37Z
-Stopped at: Completed 07-02-PLAN.md (Phase 07 complete, Milestone v0.2 complete)
-Resume file: N/A -- all plans complete
+Last session: 2026-03-12
+Stopped at: Defining requirements for v0.3
+Resume file: N/A

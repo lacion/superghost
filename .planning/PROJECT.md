@@ -23,15 +23,21 @@ Plain English test cases that execute in a real browser, with step caching that 
 - ✓ Sequential test execution with independent browser contexts — v1.0
 - ✓ Configurable: browser type, headless mode, timeout, max retries, model selection — v1.0
 - ✓ Bun-native distribution: `bun install`, `bunx`, and standalone compiled binary — v1.0
+- ✓ CLI flags: `--dry-run`, `--verbose`, `--no-cache`, `--only <pattern>` — v0.2
+- ✓ Preflight `baseUrl` reachability check before AI execution — v0.2
+- ✓ Real-time step progress output during AI execution — v0.2
+- ✓ Distinct exit codes: 0 = pass, 1 = test failure, 2 = config/runtime error — v0.2
+- ✓ Cache key normalization (whitespace/formatting-insensitive) — v0.2
 
 ### Active
 
-<!-- v0.2: DX Polish + Reliability Hardening -->
-- [ ] CLI flags: `--dry-run`, `--verbose`, `--no-cache`, `--only <pattern>`
-- [ ] Preflight `baseUrl` reachability check before AI execution
-- [ ] Real-time step progress output during AI execution
-- [ ] Distinct exit codes: 0 = pass, 1 = test failure, 2 = config/runtime error
-- [ ] Cache key normalization (whitespace/formatting-insensitive)
+<!-- v0.3: CI/CD + Team Readiness -->
+- [ ] JSON output format (`--output json`) for programmatic consumption
+- [ ] JUnit XML output format (`--output junit`) for CI reporting
+- [ ] PR workflow with test gates (GitHub Actions)
+- [ ] Linting/formatting enforcement (Biome or similar)
+- [ ] Contributor docs (CONTRIBUTING.md, issue/PR templates, SECURITY.md)
+- [ ] Env var interpolation in YAML configs (`${VAR}` syntax)
 
 ### Out of Scope
 
@@ -42,16 +48,16 @@ Plain English test cases that execute in a real browser, with step caching that 
 - Cloud-hosted execution — local/CI runner only
 - Offline mode — real-time AI execution is core value
 
-## Current Milestone: v0.2 DX Polish + Reliability Hardening
+## Current Milestone: v0.3 CI/CD + Team Readiness
 
-**Goal:** Make SuperGhost debuggable, observable, and resilient — so users can iterate efficiently and CI pipelines get actionable signals.
+**Goal:** Make SuperGhost production-ready for teams — structured CI output, enforced code quality, contributor onboarding, and flexible config.
 
 **Target features:**
-- CLI flags: `--dry-run`, `--verbose`, `--no-cache`, `--only <pattern>`
-- Preflight `baseUrl` reachability check
-- Real-time step progress output
-- Distinct exit codes (0/1/2)
-- Cache key normalization
+- JSON and JUnit XML output formats for CI reporting
+- Linting/formatting enforcement
+- PR workflow with test gates
+- Contributor docs (CONTRIBUTING.md, issue/PR templates, SECURITY.md)
+- Env var interpolation in YAML configs
 
 ## Context
 
@@ -89,4 +95,4 @@ Known areas for future work:
 | BUN_BE_BUN=1 for standalone deps | Forces bun behavior in compiled binary | ✓ Good — auto-install MCP deps on first run |
 
 ---
-*Last updated: 2026-03-11 after v0.2 milestone start*
+*Last updated: 2026-03-12 after v0.3 milestone start*
