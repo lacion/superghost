@@ -28,16 +28,17 @@ Plain English test cases that execute in a real browser, with step caching that 
 - ✓ Real-time step progress output during AI execution — v0.2
 - ✓ Distinct exit codes: 0 = pass, 1 = test failure, 2 = config/runtime error — v0.2
 - ✓ Cache key normalization (whitespace/formatting-insensitive) — v0.2
+- ✓ Linting/formatting enforcement with Biome — v0.3
+- ✓ JSON output format (`--output json`) for programmatic consumption — v0.3
+- ✓ AI-generated release notes in GitHub release workflow — v0.3
 
 ### Active
 
-<!-- v0.3: CI/CD + Team Readiness -->
-- [ ] JSON output format (`--output json`) for programmatic consumption
+<!-- v0.4: CI/CD + Team Readiness (continued) -->
 - [ ] JUnit XML output format (`--output junit`) for CI reporting
-- [ ] PR workflow with test gates (GitHub Actions)
-- [ ] Linting/formatting enforcement (Biome or similar)
-- [ ] Contributor docs (CONTRIBUTING.md, issue/PR templates, SECURITY.md)
 - [ ] Env var interpolation in YAML configs (`${VAR}` syntax)
+- [ ] PR workflow with test gates (GitHub Actions)
+- [ ] Contributor docs (CONTRIBUTING.md, issue/PR templates, SECURITY.md)
 
 ### Out of Scope
 
@@ -48,16 +49,15 @@ Plain English test cases that execute in a real browser, with step caching that 
 - Cloud-hosted execution — local/CI runner only
 - Offline mode — real-time AI execution is core value
 
-## Current Milestone: v0.3 CI/CD + Team Readiness
+## Current Milestone: v0.4 CI/CD + Team Readiness (Part 2)
 
-**Goal:** Make SuperGhost production-ready for teams — structured CI output, enforced code quality, contributor onboarding, and flexible config.
+**Goal:** Complete team-readiness features — JUnit XML for CI reporting, env var interpolation for CI-safe configs, PR workflow gates, and contributor onboarding docs.
 
 **Target features:**
-- JSON and JUnit XML output formats for CI reporting
-- Linting/formatting enforcement
-- PR workflow with test gates
-- Contributor docs (CONTRIBUTING.md, issue/PR templates, SECURITY.md)
+- JUnit XML output format for CI reporting
 - Env var interpolation in YAML configs
+- GitHub Actions PR workflow with test gates
+- Contributor docs (CONTRIBUTING.md, SECURITY.md, issue/PR templates)
 
 ## Context
 
@@ -95,4 +95,4 @@ Known areas for future work:
 | BUN_BE_BUN=1 for standalone deps | Forces bun behavior in compiled binary | ✓ Good — auto-install MCP deps on first run |
 
 ---
-*Last updated: 2026-03-12 after v0.3 milestone start*
+*Last updated: 2026-03-12 after v0.4 milestone start*
