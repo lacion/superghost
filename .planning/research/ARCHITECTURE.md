@@ -1,346 +1,182 @@
-# Architecture Research: v0.3 CI/CD + Team Readiness
+# Architecture Research
 
-**Domain:** CLI test tool -- structured output formats, linting/formatting, PR workflow gates, env var interpolation
+**Domain:** CLI testing tool — v0.4 feature integration
 **Researched:** 2026-03-12
-**Confidence:** HIGH
+**Confidence:** HIGH (based on direct source code inspection + standard format references)
 
-This document focuses exclusively on the architectural changes needed for v0.3 features. It maps each feature to integration points in the existing codebase, identifies new components vs. modifications, and recommends a build order.
+## Standard Architecture
+
+### System Overview (Current v0.3)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                          CLI Layer                            │
+│                        src/cli.ts                             │
+│  Commander.js entry point — parses flags, wires subsystems   │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+         ┌───────────────────┼───────────────────┐
+         ▼                   ▼                   ▼
+┌────────────────┐  ┌────────────────┐  ┌────────────────────┐
+│  src/config/   │  │  src/output/   │  │   src/infra/       │
+│  loader.ts     │  │  reporter.ts   │  │   preflight.ts     │
+│  schema.ts     │  │  json-formatter│  │   process-manager  │
+│  (YAML→Zod)   │  │  types.ts      │  │   signals.ts       │
+└───────┬────────┘  └────────────────┘  └────────────────────┘
+        │
+        ▼
+┌───────────────────────────────────────────────────────────────┐
+│                       Runner Layer                             │
+│  src/runner/test-runner.ts  <->  src/runner/test-executor.ts  │
+└───────────────────────────────────────────────────────────────┘
+        │                                    │
+        ▼                                    ▼
+┌────────────────┐                  ┌────────────────────────┐
+│  src/agent/    │                  │   src/cache/           │
+│  agent-runner  │                  │   cache-manager.ts     │
+│  mcp-manager   │                  │   step-replayer.ts     │
+│  model-factory │                  │   step-recorder.ts     │
+└────────────────┘                  └────────────────────────┘
+```
+
+### Component Responsibilities
+
+| Component | Responsibility | v0.4 Impact |
+|-----------|---------------|-------------|
+| `src/cli.ts` | Flag parsing, output dispatch, error handling | Modified — add `junit` to `--output` validation; add env var interpolation call site |
+| `src/config/loader.ts` | YAML read → Zod validation | Modified — add env var substitution pass between YAML parse and Zod validation |
+| `src/config/schema.ts` | Zod schema definition | Unchanged |
+| `src/output/reporter.ts` | Console output to stderr | Unchanged |
+| `src/output/json-formatter.ts` | Batch formatter — `RunResult` → JSON string | New sibling: `junit-formatter.ts` follows same pattern |
+| `src/runner/types.ts` | `TestResult`, `RunResult` interfaces | Unchanged — JUnit formatter consumes these as-is |
+| `src/runner/test-runner.ts` | Sequential orchestration, reporter hooks | Unchanged |
+| `.github/workflows/release.yml` | Release gate with tests + typecheck | Unchanged |
+| `.github/workflows/e2e.yml` | Weekly E2E smoke tests | Unchanged |
 
 ---
 
-## Current Architecture (Baseline)
+## v0.4 Integration Points
+
+### 1. JUnit XML Output — New Formatter, Minimal CLI Change
+
+**Integration pattern:** Mirror the existing `json-formatter.ts` batch-formatter pattern exactly.
+
+The JSON formatter is a pure module: it exports named functions (`formatJsonOutput`, `formatJsonDryRun`, `formatJsonError`) that accept `RunResult` + metadata and return a string. No class, no side effects, no I/O.
+
+JUnit XML follows the same contract:
 
 ```
-CLI (Commander.js, src/cli.ts)
-  |
-  +--> loadConfig() -------> YAML parse --> Zod validate --> Config
-  |
-  +--> ConsoleReporter (implements Reporter interface)
-  |
-  +--> TestRunner (orchestrates sequential execution)
-  |       |
-  |       +--> executeFn() --> TestExecutor (cache-first-then-AI strategy)
-  |       |                      |
-  |       |                      +--> CacheManager.load() / StepReplayer.replay()
-  |       |                      +--> executeAgent() --> AI agent via Vercel AI SDK
-  |       |
-  |       +--> reporter.onTestStart(testName)
-  |       +--> reporter.onTestComplete(TestResult)
-  |       +--> reporter.onRunComplete(RunResult)
-  |
-  +--> process.exit(code)  // 0=pass, 1=fail, 2=config error
+src/output/junit-formatter.ts
+  exports: formatJunitOutput(result, metadata, version) → string
+  exports: formatJunitDryRun(tests, metadata, version) → string
+  exports: formatJunitError(message, version, metadata) → string
 ```
 
-**Key architectural invariants:**
-- All human-readable output goes to stderr via `writeStderr()`
-- stdout is explicitly reserved for structured output (currently unused)
-- Reporter interface: `onTestStart`, `onTestComplete`, `onRunComplete`, `onStepProgress?`
-- RunResult contains: `results: TestResult[]`, `passed`, `failed`, `cached`, `skipped`, `totalDurationMs`
-- TestResult contains: `testName`, `testCase`, `status`, `source`, `durationMs`, `error?`, `selfHealed?`
+**What changes in `src/cli.ts`:**
 
----
+1. Extend `--output` validation from `"json"` to `"json" | "junit"`:
+   ```
+   // Line 87 currently:
+   if (options.output && options.output !== "json") {
+   // Becomes:
+   if (options.output && !["json", "junit"].includes(options.output)) {
+   ```
 
-## Feature 1: JSON Output (`--output json`)
+2. Add three parallel output blocks (normal run, dry-run, error) identical to the existing JSON blocks — call `formatJunitOutput` / `formatJunitDryRun` / `formatJunitError` when `options.output === "junit"`.
 
-### Integration Point
+3. Update the error string in the validation message: `Supported: json, junit`.
 
-**Where it touches:** CLI option parsing, Reporter dispatch, new formatter, stdout write at end of run.
+4. Import `formatJunit*` from `./output/junit-formatter.ts`.
 
-**What exists:** The stdout channel is already reserved. The RunResult/TestResult types already carry all the data needed for JSON output. The Reporter interface already has `onRunComplete(RunResult)`.
-
-### New Component: `src/output/json-formatter.ts`
-
-**Purpose:** Transform a RunResult into a structured JSON object and write it to stdout.
-
-**Not a Reporter implementation.** The JSON output should be written once at the end, after the run completes. The ConsoleReporter should still run (writing progress to stderr) while the JSON formatter writes the final result to stdout. This avoids duplicating the Reporter interface for something that is fundamentally a single write-at-end operation.
-
-```typescript
-// src/output/json-formatter.ts
-
-export interface JsonTestResult {
-  name: string;
-  testCase: string;
-  status: "passed" | "failed";
-  source: "cache" | "ai";
-  durationMs: number;
-  error?: string;
-  selfHealed?: boolean;
-}
-
-export interface JsonRunResult {
-  version: 1;
-  timestamp: string;
-  summary: {
-    total: number;
-    passed: number;
-    failed: number;
-    skipped: number;
-    cached: number;
-    durationMs: number;
-  };
-  tests: JsonTestResult[];
-}
-
-export function formatJson(runResult: RunResult): string {
-  // Transform RunResult -> JsonRunResult, JSON.stringify with 2-space indent
-}
-
-export function writeJsonToStdout(json: string): void {
-  Bun.write(Bun.stdout, json + "\n");
-}
-```
-
-### Modification: `src/cli.ts`
-
-Add `--output <format>` option with choices `console` (default), `json`, `junit`. After `runner.run()` returns the RunResult, dispatch to the appropriate formatter:
-
-```typescript
-// After runner.run() completes:
-if (options.output === "json") {
-  writeJsonToStdout(formatJson(result));
-} else if (options.output === "junit") {
-  writeJunitToStdout(formatJunit(result, config));
-}
-```
-
-### Data Flow
-
-```
-TestRunner.run()
-    |
-    +--> ConsoleReporter (stderr, always, progress/spinners)
-    |
-    v
-RunResult
-    |
-    +--> if --output json  --> formatJson(RunResult) --> stdout
-    +--> if --output junit --> formatJunit(RunResult) --> stdout
-    +--> if console (default) --> nothing to stdout (summary already on stderr)
-```
-
-### Design Decision: --output vs --reporter
-
-Use `--output` (not `--reporter`) because this controls the output format to stdout, not which Reporter implementation runs. The ConsoleReporter always runs for interactive feedback. `--output` adds a structured write to stdout at the end. This is the pattern used by Jest (`--json`), Vitest (`--reporter json`), and most CLI test tools.
-
----
-
-## Feature 2: JUnit XML Output (`--output junit`)
-
-### Integration Point
-
-Same as JSON: new formatter, single write to stdout at end of run.
-
-### New Component: `src/output/junit-formatter.ts`
-
-**Purpose:** Transform a RunResult into JUnit XML format.
-
-No external XML library needed -- JUnit XML is simple enough to generate with string templates. Adding a dependency like `fast-xml-parser` or `xmlbuilder2` is overkill for generating (not parsing) a fixed-structure XML document.
-
-```typescript
-// src/output/junit-formatter.ts
-
-export function formatJunit(runResult: RunResult, suiteName?: string): string {
-  // Generate JUnit XML string manually
-}
-```
-
-**Target JUnit XML structure:**
+**JUnit XML structure to generate:**
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="superghost" tests="4" failures="1" errors="0" skipped="0" time="12.345">
-  <testsuite name="superghost" tests="4" failures="1" errors="0" skipped="0" time="12.345" timestamp="2026-03-12T10:00:00Z">
-    <testcase name="Login Flow" classname="superghost" time="3.200">
+<testsuites name="superghost" tests="N" failures="F" errors="0" time="T.TTT">
+  <testsuite name="superghost" tests="N" failures="F" errors="0" time="T.TTT"
+             timestamp="ISO8601" hostname="localhost">
+    <testcase name="Test Name" classname="superghost" time="T.TTT">
+      <!-- no child element for passing tests -->
     </testcase>
-    <testcase name="Dashboard Load" classname="superghost" time="1.100">
-      <failure message="Element not found" type="AssertionFailure">Element not found</failure>
-    </testcase>
-    <testcase name="Checkout Process" classname="superghost" time="5.400">
-      <properties>
-        <property name="source" value="cache"/>
-      </properties>
+    <testcase name="Failing Test" classname="superghost" time="T.TTT">
+      <failure message="Error summary" type="TestFailure">
+        Full error message
+      </failure>
     </testcase>
   </testsuite>
 </testsuites>
 ```
 
-**Key mapping decisions:**
-- `classname` = `"superghost"` (flat, no package hierarchy -- there is no concept of test classes)
-- `time` = `durationMs / 1000` (JUnit uses seconds as float)
-- Failed tests get `<failure>` with the error message
-- `source` (cache/ai) and `selfHealed` go into `<properties>` for each testcase -- useful metadata without breaking standard parsers
-- No `<error>` elements -- SuperGhost failures are always assertion-class (the AI says test failed), not unexpected exceptions
-- `timestamp` in ISO 8601 format
+Key decisions:
+- Single `<testsuite>` — SuperGhost has no suite hierarchy; all tests are flat
+- `classname="superghost"` — CI UIs group by classname; a fixed value is correct for a flat suite
+- `time` attribute in seconds (float), not milliseconds — divide `durationMs / 1000`
+- `errors` is always 0 — SuperGhost has no concept of "error vs failure"; failed tests map to `<failure>`
+- No `<skipped>` element for MVP — `--only` filtering means skipped tests are absent from `RunResult.results`
+- Dry-run JUnit: emit all tests as `<testcase>` with no child element (no execution = no result to report)
+- Error JUnit (config load failure): emit single `<testcase>` containing `<error>` child
 
-### Modification: `src/cli.ts`
-
-Same dispatch pattern as JSON (see above).
-
----
-
-## Feature 3: Env Var Interpolation in YAML Configs
-
-### Integration Point
-
-**Where it touches:** Config loading pipeline, between YAML parse and Zod validation.
-
-**What exists:** `loadConfig()` in `src/config/loader.ts` has a clean 3-layer pipeline: file read -> YAML parse -> Zod validate. Env var interpolation slots in as a new layer between parse and validate.
-
-### New Component: `src/config/interpolate.ts`
-
-**Purpose:** Walk a parsed YAML object and replace `${VAR_NAME}` patterns with `process.env` values.
-
-```typescript
-// src/config/interpolate.ts
-
-/**
- * Recursively walk an object and replace ${VAR_NAME} patterns
- * in string values with process.env[VAR_NAME].
- *
- * Supports:
- *   ${VAR}           - required, throws if missing
- *   ${VAR:-default}  - optional with default value
- *
- * Only operates on string values. Does not modify keys or non-string values.
- */
-export function interpolateEnvVars(obj: unknown): unknown {
-  // Regex: /\$\{([^}]+)\}/g
-  // For each match, split on :- for default support
-  // Throw ConfigLoadError if required var is missing
-}
-```
-
-### Modification: `src/config/loader.ts`
-
-Insert interpolation between YAML parse and Zod validation:
-
-```typescript
-// Current:
-raw = YAML.parse(content);
-const result = ConfigSchema.safeParse(raw);
-
-// After:
-raw = YAML.parse(content);
-raw = interpolateEnvVars(raw);  // <-- new layer
-const result = ConfigSchema.safeParse(raw);
-```
-
-**Error handling:** Missing required env vars throw `ConfigLoadError` with a clear message naming the variable and the config field path where it appeared. This preserves the existing error UX pattern.
-
-### Design Decision: No External Library
-
-The interpolation pattern `${VAR}` with optional `${VAR:-default}` is trivially implementable with a single regex and recursive walk. Libraries like `string-env-interpolation` or `yaml-env-defaults` add dependencies for 20 lines of code. The regex approach also gives full control over error messages, which matters for CLI UX.
-
-### Data Flow
-
-```
-YAML file content
-    |
-    v
-YAML.parse(content) --> raw JS object
-    |
-    v
-interpolateEnvVars(raw) --> raw JS object with env vars resolved
-    |
-    v
-ConfigSchema.safeParse(resolved) --> validated Config
-```
-
-### Scope of Interpolation
-
-Interpolation applies to **all string values** in the config, not just specific fields. This means:
-- `baseUrl: ${APP_URL}` works
-- `model: ${AI_MODEL:-claude-sonnet-4-6}` works
-- `tests[0].case: "check login at ${APP_URL}"` works
-- `timeout: ${TIMEOUT}` -- the string "5000" gets interpolated, then Zod coerces/validates the number
-
-The recursive walk handles arrays and nested objects naturally.
+**No new dependencies required.** Template literal string building handles XML serialization for this simple, single-level structure. No external XML library needed.
 
 ---
 
-## Feature 4: Linting/Formatting Enforcement (Biome)
+### 2. Env Var Interpolation — Config Loader Modification
 
-### Integration Point
+**Integration point:** `src/config/loader.ts`, between YAML parse and Zod validation.
 
-**Where it touches:** New config file at repo root, new npm scripts, GitHub Actions workflow. No source code changes.
+The loader has a clean 3-layer pipeline:
 
-### New Files
-
-| File | Purpose |
-|------|---------|
-| `biome.json` | Biome configuration -- linter rules, formatter settings |
-
-### Modification: `package.json`
-
-Add scripts:
-
-```json
-{
-  "scripts": {
-    "lint": "biome check .",
-    "lint:fix": "biome check --write .",
-    "format": "biome format --write .",
-    "format:check": "biome format ."
-  }
-}
+```
+Layer 1:   File read   →  content: string
+Layer 2:   YAML.parse  →  raw: unknown
+Layer 3:   Zod.parse   →  Config
 ```
 
-Add dev dependency:
+Env var interpolation inserts as Layer 1.5 — a string transformation on raw YAML content before parsing:
 
-```json
-{
-  "devDependencies": {
-    "@biomejs/biome": "^2.3.0"
-  }
-}
+```
+Layer 1:    File read             →  content: string
+Layer 1.5:  interpolateEnvVars() →  interpolated: string   (NEW)
+Layer 2:    YAML.parse            →  raw: unknown
+Layer 3:    Zod.parse             →  Config
 ```
 
-### Biome Configuration Strategy
+**Why string-level, not object-level:**
+- Applied before YAML.parse, so `${VAR}` tokens are resolved before the parser runs — avoids YAML misparse of unquoted tokens
+- Consistent with Docker Compose, GitHub Actions, CircleCI — users already know this pattern
+- Simpler implementation — no recursive object traversal required
 
-```json
-{
-  "$schema": "https://biomejs.dev/schemas/2.3.0/schema.json",
-  "organizeImports": { "enabled": true },
-  "formatter": {
-    "enabled": true,
-    "indentStyle": "space",
-    "indentWidth": 2,
-    "lineWidth": 100
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "recommended": true
+**New private function in `loader.ts`:**
+
+```typescript
+function interpolateEnvVars(content: string): string {
+  return content.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (match, varName) => {
+    const value = process.env[varName];
+    if (value === undefined) {
+      throw new ConfigLoadError(
+        `Env var not set: ${varName}\n  Set it before running: export ${varName}=<value>`
+      );
     }
-  },
-  "files": {
-    "ignore": ["node_modules", "dist", ".superghost-cache"]
-  }
+    return value;
+  });
 }
 ```
 
-### Why Biome Over ESLint + Prettier
+Key decisions:
+- **Fail loudly on undefined vars** — silently leaving `${VAR}` in the string causes confusing Zod errors downstream (e.g., "Expected url, received string" for `baseUrl: ${BASE_URL}`)
+- **Regex pattern `[A-Z_][A-Z0-9_]*`** — conventional env var naming, avoids matching JavaScript template literal patterns if users write `${someVar}` in test case descriptions (lowercase = no match)
+- **No library needed** — `string-env-interpolation` npm package implements this exact same regex; adding a dep for 4 lines is not justified
+- **Error is a `ConfigLoadError`** — caught by existing error handling in `cli.ts`, routes to exit code 2 with a helpful message
 
-- **Single tool** for both linting and formatting (no config sync issues)
-- **Fast** -- written in Rust, runs in <100ms on a 3,787 LOC codebase
-- **Bun-native compatible** -- installs via `bun add`, no Node.js-specific tooling
-- **Zero-config viable** -- recommended rules work out of the box
-- **Active development** -- v2.3 as of early 2026, strong TypeScript inference since v2.0
-- **No dependency conflicts** -- ESLint's plugin ecosystem has frequent breaking changes
-
-### Source Code Impact
-
-Biome adoption may require reformatting existing files to match the configured style. This is a one-time `biome check --write .` pass. The PR should apply formatting fixes in a single commit before any feature work.
+**What changes in `loader.ts`:** Add `interpolateEnvVars` function (~10 lines). Call it on line ~51 between `content = await file.text()` and `raw = YAML.parse(content)`. `src/config/schema.ts` is unchanged.
 
 ---
 
-## Feature 5: PR Workflow with Test Gates (GitHub Actions)
+### 3. GitHub Actions PR Workflow — New Workflow File
 
-### Integration Point
+**Integration point:** `.github/workflows/pr.yml` (new file; no modifications to existing workflows).
 
-**Where it touches:** New GitHub Actions workflow file, branch protection rules.
-
-### New File: `.github/workflows/ci.yml`
+**What the PR workflow needs:**
 
 ```yaml
 name: CI
@@ -348,316 +184,163 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run lint
-
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run typecheck
-
-  test:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: bun test
+      - run: bunx tsc --noEmit
+      - run: bunx biome check .
 ```
 
-### Design Decisions
+**Intentional scope limits:**
+- No E2E tests — requires `ANTHROPIC_API_KEY` and browser install; too slow/costly per PR and impossible for external contributors who lack secrets access
+- No binary builds — `release.yml` handles that on tag push
+- No `bunx playwright install` — not needed without E2E
 
-**Three separate jobs, not one.** Running lint, typecheck, and test as separate jobs enables:
-- Parallel execution (faster feedback)
-- Granular status checks in GitHub PR UI (see exactly what failed)
-- Independent retries (flaky test does not re-run lint)
+**Relationship to existing workflows:**
 
-**No E2E in PR checks.** The existing `e2e.yml` runs on schedule/dispatch because E2E tests require AI API keys and are slow/non-deterministic. PR checks should be fast, deterministic, and free.
+| Workflow | Trigger | Unit Tests | Typecheck | Lint | E2E | Binary Build |
+|----------|---------|-----------|-----------|------|-----|--------------|
+| `pr.yml` (new) | `pull_request` to `main` | Yes | Yes | Yes | No | No |
+| `release.yml` | Tag `v*.*.*` | Yes | Yes | No | Smoke | Yes |
+| `e2e.yml` | Schedule (weekly) + manual | No | No | No | Full suite | No |
 
-**Branch protection rules** (manual setup, not automated):
-- Require status checks: `lint`, `typecheck`, `test`
-- Require branch to be up to date before merging
-- Require PR reviews (optional, depends on team size)
-
-### Relationship to Existing Workflows
-
-| Workflow | Trigger | Purpose | Change |
-|----------|---------|---------|--------|
-| `ci.yml` | PR/push to main | Fast deterministic gates | **NEW** |
-| `e2e.yml` | Weekly schedule, manual dispatch | AI-dependent E2E validation | No change |
-| `release.yml` | Tag push | Build + publish | Add `bun run lint` step |
+**Branch protection:** The `ci` job in `pr.yml` becomes the required status check via GitHub branch protection rules. CONTRIBUTING.md should document this expectation.
 
 ---
 
-## Feature 6: Contributor Docs
+### 4. Contributor Docs — New Files, No Code Changes
 
-### Integration Point
+These are documentation artifacts with zero code integration:
 
-**Where it touches:** New markdown files at repo root and `.github/` directory. No source code changes.
+| File | Location | Purpose |
+|------|----------|---------|
+| `CONTRIBUTING.md` | repo root | Setup, branching, commit conventions, PR process, required CI check |
+| `SECURITY.md` | repo root | Vulnerability reporting process |
+| `.github/ISSUE_TEMPLATE/bug_report.md` | `.github/ISSUE_TEMPLATE/` | Structured bug reports |
+| `.github/ISSUE_TEMPLATE/feature_request.md` | `.github/ISSUE_TEMPLATE/` | Feature proposals |
+| `.github/pull_request_template.md` | `.github/` | PR checklist |
 
-### New Files
-
-| File | Purpose |
-|------|---------|
-| `CONTRIBUTING.md` | How to set up dev environment, run tests, submit PRs |
-| `SECURITY.md` | How to report security vulnerabilities |
-| `.github/ISSUE_TEMPLATE/bug_report.md` | Structured bug report template |
-| `.github/ISSUE_TEMPLATE/feature_request.md` | Feature request template |
-| `.github/PULL_REQUEST_TEMPLATE.md` | PR description template with checklist |
-
-### No Architectural Impact
-
-These are documentation-only changes. They reference existing commands (`bun test`, `bun run lint`, `bun run typecheck`) and the CI workflow.
+No new directories need to be created — `.github/` already exists (contains `workflows/` and `dependabot.yml`).
 
 ---
 
-## Component Map: New vs. Modified
+## Data Flow Changes
 
-### New Components
+### Output Path: Current vs v0.4
 
-| Component | Path | Purpose | Depends On |
-|-----------|------|---------|------------|
-| JSON Formatter | `src/output/json-formatter.ts` | Transform RunResult to JSON string | `RunResult` type |
-| JUnit Formatter | `src/output/junit-formatter.ts` | Transform RunResult to JUnit XML string | `RunResult` type |
-| Env Interpolator | `src/config/interpolate.ts` | Replace `${VAR}` patterns in parsed config | `process.env` |
-| Biome Config | `biome.json` | Linter/formatter configuration | None |
-| CI Workflow | `.github/workflows/ci.yml` | PR quality gates | Biome, bun test |
-| Contributor Docs | `CONTRIBUTING.md`, etc. | Onboarding documentation | CI workflow |
+```
+Current:
+  RunResult --> formatJsonOutput() --> process.stdout   (when --output json)
+  RunResult --> ConsoleReporter    --> Bun.stderr        (always)
 
-### Modified Components
+v0.4 addition:
+  RunResult --> formatJunitOutput() --> process.stdout  (when --output junit)
+```
 
-| Component | Path | Change | Risk |
-|-----------|------|--------|------|
-| CLI | `src/cli.ts` | Add `--output <format>` option, dispatch to formatters | LOW -- additive option |
-| Config Loader | `src/config/loader.ts` | Insert `interpolateEnvVars()` call between parse and validate | LOW -- single insertion point |
-| package.json | `package.json` | Add Biome dev dep, lint/format scripts | LOW -- dev tooling only |
-| release.yml | `.github/workflows/release.yml` | Add lint step | LOW -- additive |
+Output formats are mutually exclusive via `options.output`. No multiplexing.
 
-### Unchanged Components
+### Config Load Path: Current vs v0.4
 
-| Component | Why Unchanged |
-|-----------|---------------|
-| TestRunner | Does not know about output format -- only calls Reporter |
-| TestExecutor | Execution logic is format-agnostic |
-| ConsoleReporter | Still runs for stderr progress; new formatters are separate |
-| Reporter interface | JSON/JUnit are not Reporters -- they transform RunResult at end |
-| CacheManager | Cache behavior is independent of output format |
-| Agent subsystem | AI execution is independent of output format |
-| Config schema | Env vars are resolved before Zod sees the data |
+```
+Current:
+  file.text() --> YAML.parse() --> ConfigSchema.safeParse() --> Config
+
+v0.4:
+  file.text() --> interpolateEnvVars() --> YAML.parse() --> ConfigSchema.safeParse() --> Config
+```
+
+The `Config` type and all downstream consumers are unchanged.
 
 ---
 
 ## Recommended Build Order
 
-The build order is driven by dependency chains and testing value.
+Feature dependency graph:
 
-### Phase 1: Env Var Interpolation
+```
+junit-formatter.ts      (no deps on other v0.4 features)
+  --> cli.ts wiring     (requires junit-formatter)
 
-**Why first:** Unblocks config flexibility needed for CI/CD usage. No dependency on other features. The config loader is the most foundational component -- getting this right early avoids churn.
+loader.ts interpolation (no deps on other v0.4 features, fully parallel)
 
-**Build steps:**
-1. Create `src/config/interpolate.ts` with `interpolateEnvVars()`
-2. Unit test: basic substitution, missing vars, defaults, nested objects, arrays
-3. Modify `src/config/loader.ts` to call interpolation between parse and validate
-4. Integration test: YAML with `${VAR}` resolved correctly
+pr.yml                  (no code deps; best after junit + env var so CI validates new features)
 
-**Risk:** LOW. Well-defined insertion point. Existing tests continue to pass because current configs have no `${VAR}` syntax.
+contributor docs        (reference pr.yml, so build last)
+```
 
-### Phase 2: JSON Output Format
-
-**Why second:** Simplest output format. Validates the `--output` CLI option pattern that JUnit reuses. Provides immediate CI/CD value (pipe to `jq`, consume in scripts).
-
-**Build steps:**
-1. Create `src/output/json-formatter.ts` with `formatJson()` and `writeJsonToStdout()`
-2. Add `--output <format>` option to CLI (initially just `console` and `json`)
-3. Wire: after `runner.run()`, dispatch to `formatJson` if `--output json`
-4. Unit test: verify JSON structure, field mapping from RunResult
-5. Integration test: `--output json` writes valid JSON to stdout, stderr still shows progress
-
-**Risk:** LOW. Additive change. The RunResult already contains all needed data.
-
-### Phase 3: JUnit XML Output Format
-
-**Why third:** Same pattern as JSON, reuses the `--output` dispatch. JUnit is more complex (XML generation, attribute mapping) but the architecture is identical.
-
-**Build steps:**
-1. Create `src/output/junit-formatter.ts` with `formatJunit()`
-2. Add `junit` to the `--output` choices
-3. Wire into the same dispatch in CLI
-4. Unit test: verify XML structure, escaped characters, time format
-5. Integration test: valid JUnit XML to stdout
-
-**Risk:** LOW. Same pattern as JSON. XML escaping needs care (test names with `<`, `>`, `&`, `"`).
-
-### Phase 4: Linting/Formatting (Biome)
-
-**Why fourth:** Foundational for PR gates, but does not block output format features. Should be done before creating the CI workflow so the workflow has lint/format commands to call.
-
-**Build steps:**
-1. Add `@biomejs/biome` dev dependency
-2. Create `biome.json` configuration
-3. Add lint/format npm scripts to `package.json`
-4. Run `biome check --write .` to apply formatting to existing codebase
-5. Verify all existing tests still pass after formatting
-
-**Risk:** MEDIUM. Formatting may produce a large diff touching many files. Best done as a standalone commit/PR to keep reviews clean. Must verify Biome rules do not conflict with existing code patterns (e.g., `any` types in agent code).
-
-### Phase 5: PR Workflow (GitHub Actions)
-
-**Why fifth:** Depends on Biome (needs `bun run lint`) and existing test infrastructure. Should be one of the last code changes so the workflow tests everything that came before it.
-
-**Build steps:**
-1. Create `.github/workflows/ci.yml` with lint, typecheck, test jobs
-2. Add lint step to `.github/workflows/release.yml`
-3. Test by opening a PR against the branch
-4. Configure branch protection rules (manual GitHub UI step)
-
-**Risk:** LOW. Declarative YAML config. Test by pushing the workflow and verifying checks appear.
-
-### Phase 6: Contributor Docs
-
-**Why last:** References all the tooling and workflows established in previous phases. Writing docs before the tools exist means docs become stale immediately.
-
-**Build steps:**
-1. Create `CONTRIBUTING.md` referencing dev setup, linting, testing, PR process
-2. Create `SECURITY.md`
-3. Create issue and PR templates
-4. Verify all referenced commands work
-
-**Risk:** NONE. Documentation-only, no code changes.
+**Recommended sequence:**
+1. Env var interpolation — smallest change, highest CI value, fully self-contained
+2. JUnit formatter — pure function module, no external deps
+3. CLI `--output junit` wiring — minimal: validation check + 3 output blocks + import
+4. PR workflow — validates all code changes in CI gate
+5. Contributor docs — reference the complete workflow once it exists
 
 ---
 
-## Anti-Patterns to Avoid
+## Anti-Patterns
 
-### Anti-Pattern 1: Making JSON/JUnit into Reporter implementations
+### Anti-Pattern 1: JUnit Formatter as a Reporter Class
 
-**What people do:** Create `JsonReporter` and `JunitReporter` that implement the `Reporter` interface, tracking state across `onTestStart`/`onTestComplete` calls.
+**What people do:** Create a `JUnitReporter` implementing the `Reporter` interface, emitting XML progressively via `onTestStart` / `onTestComplete` hooks.
 
-**Why it is wrong:** The Reporter interface is designed for real-time progress feedback (spinners, streaming output). JSON and JUnit output is a batch transformation of the final RunResult. Making them Reporters means:
-- Duplicating aggregation logic already in `aggregateResults()`
-- Managing internal state that mirrors RunResult
-- Losing the ability to show console progress alongside structured output
+**Why it's wrong:** JUnit XML requires totals in the `<testsuites>` and `<testsuite>` root elements (`tests="N" failures="F"`), which are only known after all tests complete. Streaming construction requires mutable accumulation state or a two-pass approach, adding complexity with no benefit.
 
-**Do this instead:** Keep ConsoleReporter for progress. Add formatters that transform the completed RunResult into output strings. Write to stdout once at the end.
+**Do this instead:** Follow the `json-formatter.ts` pattern — batch function receiving the complete `RunResult`, returning a string. Called once after `runner.run()` resolves.
 
-### Anti-Pattern 2: Env var interpolation in the YAML string before parsing
+### Anti-Pattern 2: Env Var Substitution at Object Level
 
-**What people do:** Regex-replace `${VAR}` in the raw YAML string content before calling `YAML.parse()`.
+**What people do:** Walk the parsed `Config` object recursively, substituting `${VAR}` in string fields.
 
-**Why it is wrong:** Env var values may contain YAML-special characters (`#`, `:`, `[`, `{`) that break YAML parsing. A value like `password: ${DB_PASS}` where `DB_PASS=foo:bar#baz` becomes `password: foo:bar#baz` which YAML interprets incorrectly.
+**Why it's wrong:** Requires handling nested objects, arrays, and type-specific fields. Runs after YAML parsing, which means an unquoted `${VAR}` in a URL position can cause a YAML parse error before substitution runs. Also requires changes to `schema.ts` to permit `${...}` as a pre-substitution passthrough.
 
-**Do this instead:** Parse YAML first to get the JS object, then walk the object and replace `${VAR}` patterns in string values. This way YAML parsing is complete and env var values are just string content.
+**Do this instead:** Substitute at raw string level before YAML parsing. One regex pass on the file content. Docker Compose, GitHub Actions, and CircleCI all use this approach.
 
-### Anti-Pattern 3: Using a full XML library for JUnit generation
+### Anti-Pattern 3: E2E Tests in PR Workflow
 
-**What people do:** Add `fast-xml-parser`, `xmlbuilder2`, or `js2xmlparser` as a dependency to generate JUnit XML.
+**What people do:** Add E2E smoke tests to every PR for maximum coverage confidence.
 
-**Why it is wrong:** JUnit XML is a fixed, well-known structure. Generation (not parsing) of a 30-line XML document does not need a 50KB+ dependency. The XML escaping rules are trivial (5 characters: `<`, `>`, `&`, `"`, `'`).
+**Why it's wrong:** SuperGhost E2E requires a live AI API key (secret) and a browser install. External contributors cannot access repository secrets. Every commit push adds 2-5 minutes and API costs to the feedback loop.
 
-**Do this instead:** Template-based string generation with a small `escapeXml()` helper. Keeps the dependency count low and the output fully controllable.
+**Do this instead:** PR workflow covers unit tests + typecheck + lint. E2E runs on schedule (`e2e.yml`) and on release tag (`release.yml`) where secrets are controlled and costs are acceptable.
 
-### Anti-Pattern 4: Coupling env var interpolation to specific config fields
+### Anti-Pattern 4: New `--junit` Flag Instead of Extending `--output`
 
-**What people do:** Only interpolate `baseUrl`, `model`, and a few known fields, hardcoding the field list.
+**What people do:** Add `--junit` as a boolean flag alongside `--output json`.
 
-**Why it is wrong:** Users will want env vars in test case descriptions (`case: "login at ${APP_URL}"`), context fields, and future config additions. Hardcoding a field list means every new config field needs an interpolation update.
+**Why it's wrong:** Creates flag proliferation and inconsistency — one output format gets a flag, another gets an option value.
 
-**Do this instead:** Recursive walk that interpolates all string values regardless of their position in the config tree. The schema validation after interpolation catches any invalid results.
+**Do this instead:** Extend `--output` to accept `junit` as a second valid value. The validation block in `cli.ts` already exists and needs a one-line change.
 
 ---
 
-## Data Flow: Complete v0.3 Pipeline
+## Integration Summary
 
-```
-YAML config file
-    |
-    v
-Bun.file().text() -----> raw string
-    |
-    v
-YAML.parse() ----------> raw JS object
-    |
-    v
-interpolateEnvVars() ---> resolved JS object (${VAR} replaced) [NEW]
-    |
-    v
-ConfigSchema.safeParse() -> Config (validated)
-    |
-    v
-CLI option parsing ------> --output json|junit|console [NEW]
-                            --verbose, --only, --no-cache, etc.
-    |
-    v
-TestRunner.run()
-    |
-    +--> ConsoleReporter (stderr, always active)
-    |       onTestStart -> spinner
-    |       onStepProgress -> spinner update / verbose log
-    |       onTestComplete -> spinner success/error
-    |       onRunComplete -> summary box
-    |
-    v
-RunResult
-    |
-    +--> if --output json:  formatJson(RunResult) -> stdout [NEW]
-    +--> if --output junit: formatJunit(RunResult) -> stdout [NEW]
-    +--> if console: nothing to stdout (default)
-    |
-    v
-process.exit(code)
-```
+| Feature | New Files | Modified Files | Estimated Change Size |
+|---------|-----------|----------------|----------------------|
+| JUnit XML formatter | `src/output/junit-formatter.ts` | none | ~80 lines |
+| CLI `--output junit` wiring | none | `src/cli.ts` | ~20 lines |
+| Env var interpolation | none | `src/config/loader.ts` | ~15 lines |
+| PR workflow | `.github/workflows/pr.yml` | none | ~25 lines YAML |
+| Contributor docs | 5 doc files | none | documentation only |
 
----
-
-## Testing Strategy for New Components
-
-| Component | Unit Test Focus | Integration Test Focus |
-|-----------|-----------------|------------------------|
-| `interpolateEnvVars()` | Single var, multiple vars, missing var error, default values, nested objects, arrays, non-string passthrough | CLI with YAML containing `${VAR}`, verify resolved config |
-| `formatJson()` | Correct JSON structure, all fields mapped, edge cases (empty results, long error strings) | `--output json` produces parseable JSON on stdout |
-| `formatJunit()` | Valid XML structure, XML escaping, time format (seconds not ms), failure/properties elements | `--output junit` produces valid JUnit XML, parseable by CI tools |
-| Biome config | N/A (config file) | `bun run lint` exits 0 on clean code |
-| CI workflow | N/A (YAML config) | PR triggers checks, all three jobs pass |
-
-### Critical Integration Test
-
-The most important integration test for v0.3:
-
-```typescript
-// Verify stdout/stderr separation with --output json
-test("--output json writes JSON to stdout and progress to stderr", async () => {
-  const { stdout, stderr } = await runCli(["--config", "...", "--output", "json"]);
-  const parsed = JSON.parse(stdout);  // Must not throw
-  expect(parsed.version).toBe(1);
-  expect(parsed.tests).toBeArray();
-  expect(stderr).toContain("superghost");  // Progress still on stderr
-});
-```
+All four features are independent of each other. None requires changes to the runner, agent, cache, or infra layers.
 
 ---
 
 ## Sources
 
-- [JUnit XML format specification (testmoapp/junitxml)](https://github.com/testmoapp/junitxml) -- HIGH confidence, authoritative community spec
-- [Biome toolchain](https://biomejs.dev/) -- HIGH confidence, official documentation
-- [Biome v2.0+ TypeScript inference](https://biomejs.dev/linter/) -- HIGH confidence, official docs
-- [GitHub Actions reusable workflows](https://oneuptime.com/blog/post/2025-12-20-github-actions-reusable-workflows/view) -- MEDIUM confidence, tutorial
-- [GitHub Actions PR status checks configuration](https://oneuptime.com/blog/post/2026-01-26-status-checks-github-actions/view) -- MEDIUM confidence, tutorial
-- Existing SuperGhost source code analysis -- HIGH confidence, direct inspection
+- Direct source code inspection: `src/cli.ts`, `src/output/json-formatter.ts`, `src/runner/types.ts`, `src/config/loader.ts`, `src/output/types.ts`, `src/runner/test-runner.ts`, `.github/workflows/release.yml`, `.github/workflows/e2e.yml` (HIGH confidence)
+- [JUnit XML format guide (Gaffer)](https://gaffer.sh/blog/junit-xml-format-guide/) — element and attribute reference (MEDIUM confidence)
+- [JUnit XML specification (testmoapp/junitxml)](https://github.com/testmoapp/junitxml) — community de-facto standard (MEDIUM confidence)
+- [GitHub Actions pull_request trigger](https://oneuptime.com/blog/post/2025-12-20-github-actions-pull-request-triggers/view) — PR workflow patterns (HIGH confidence via official docs)
+- [string-env-interpolation npm](https://www.npmjs.com/package/string-env-interpolation) — confirms `/\$\{(\w+)\}/g` regex pattern is standard; no library needed (HIGH confidence)
 
 ---
-*Architecture research for: SuperGhost v0.3 CI/CD + Team Readiness*
+*Architecture research for: SuperGhost v0.4 feature integration*
 *Researched: 2026-03-12*

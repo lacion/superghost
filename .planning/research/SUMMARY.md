@@ -1,17 +1,17 @@
 # Project Research Summary
 
-**Project:** SuperGhost v0.3 — CI/CD + Team Readiness
-**Domain:** AI-powered E2E testing CLI — structured output formats, linting enforcement, PR workflow gates, env var interpolation, contributor readiness
+**Project:** SuperGhost v0.4 — CI/CD + Team Readiness
+**Domain:** CLI testing tool — JUnit XML output, env var interpolation, GitHub Actions PR workflow, contributor docs
 **Researched:** 2026-03-12
 **Confidence:** HIGH
 
 ## Executive Summary
 
-SuperGhost v0.3 is a CI/CD and team-readiness milestone for an already-shipped AI-powered E2E testing CLI. The core v1.0 engine (AI agent, browser automation, caching) and v0.2 DX polish (exit codes, verbose mode, stderr/stdout separation) are complete. v0.3 adds the six features that make SuperGhost safe to adopt in team environments: machine-readable output formats (JSON and JUnit XML), linting/formatting enforcement via Biome, a GitHub Actions PR quality gate, env var interpolation in YAML configs, and contributor documentation. Every one of these features has a well-understood, documented implementation pattern — this is not exploratory work.
+SuperGhost v0.4 is a targeted CI/CD readiness milestone for an existing AI-powered CLI testing tool. The four features — JUnit XML output, env var interpolation, GitHub Actions PR workflow, and contributor docs — are all well-understood, low-complexity additions that follow established patterns already present in the codebase. No new runtime dependencies are needed; every feature is implementable as pure TypeScript or configuration/Markdown files using existing infrastructure. The recommended approach is to treat each feature as a small, isolated unit that integrates into clearly defined seams: `src/output/` for the JUnit formatter, `src/config/loader.ts` for interpolation, `.github/workflows/` for CI, and repo root for docs. The existing `json-formatter.ts` batch-function pattern is the direct template for the JUnit formatter; the existing `release.yml` and `e2e.yml` workflows supply all required actions at the correct pinned versions.
 
-The recommended approach is dependency-ordered construction with a zero-new-npm-dependencies policy for all output and interpolation features. The existing `Reporter` interface, `RunResult`/`TestResult` types, and the critical stdout-is-for-machines/stderr-is-for-humans architectural invariant are the correct foundation for everything in this milestone. The only new npm dependency is `@biomejs/biome` (pinned exact version), which replaces what would otherwise be five or more ESLint + Prettier packages. JSON output, JUnit XML output, env var interpolation, and the GitHub Actions workflow all require zero new runtime dependencies.
+The dominant risk in this milestone is not implementation complexity but correctness in the details. JUnit XML has no formal specification and CI tools behave inconsistently when attributes are missing or values are formatted incorrectly — most notably `classname` (causes silent result grouping failures), `time` in milliseconds instead of seconds (produces wildly inflated timing displays), and control characters or ANSI escape sequences in failure message bodies (produces unparseable XML that only breaks when tests fail). Env var interpolation carries a distinct secret-leakage risk: resolved values must not flow into cache file metadata or CI artifact outputs. Both categories of risk are fully preventable with targeted unit tests written alongside the implementations.
 
-The key risks are implementation details, not architectural: stdout pollution corrupting JSON output when Commander.js writes help/version text; JUnit XML missing the `classname` attribute causing CI tools to silently drop results; env var interpolation being applied before YAML parsing (which breaks on YAML-special characters in env var values); and Biome's first-run formatting explosion on existing files if not sequenced before feature work. All of these are avoidable with a disciplined build order that puts Biome setup first and applies explicit stdout/stderr routing discipline for all machine-readable output.
+The correct implementation sequence is: env var interpolation first (foundational, enables all CI configs to reference secrets safely), JUnit XML formatter second (pure function, no dependencies on interpolation, mirrors `json-formatter.ts` exactly), CLI wiring for `--output junit` third (minimal change to `cli.ts`), PR workflow fourth (validates all code changes in CI using `pull_request` trigger exclusively), and contributor docs last (written after all tooling is finalized and verified command-by-command on a clean checkout). All four features are independent of the runner, agent, cache, and infra layers.
 
 ---
 
@@ -19,184 +19,106 @@ The key risks are implementation details, not architectural: stdout pollution co
 
 ### Recommended Stack
 
-The existing stack (Bun >=1.2.0, TypeScript 5.x, Vercel AI SDK 6.x, Commander.js 14.x, Zod 4.x, picocolors, nanospinner, picomatch) requires no changes. The v0.3 stack adds exactly one npm package: `@biomejs/biome@^2.4.6` (exact pin via `--exact` flag), which provides linting, formatting, and import sorting as a single Rust binary — replacing what would otherwise require five or more packages and multiple configuration files.
+No new runtime dependencies are required for v0.4. The entire milestone is implementable within the existing stack (Bun, Vercel AI SDK, Commander.js, Zod, `yaml`, Biome, Playwright MCP). JUnit XML generation is approximately 80 lines of pure TypeScript using template literals with proper XML escaping — adding `junit-report-builder` or any XML library for a structure this shallow contradicts the project's demonstrated lean-dependency posture. Env var interpolation is 10–15 lines in `src/config/loader.ts`. The PR workflow reuses `actions/checkout@v4` and `oven-sh/setup-bun@v2` already pinned in the existing `release.yml` and `e2e.yml` — keeping versions consistent matters more than upgrading to `actions/checkout@v6` for a patch release.
 
-For GitHub Actions, three actions are used but none are npm dependencies: `oven-sh/setup-bun@v2` (official Bun CI action), `mikepenz/action-junit-report@v6` (JUnit XML to PR annotations), and `actions/checkout@v4` (standard checkout). JSON output, JUnit XML generation, env var interpolation, and the CI workflow all use zero new npm dependencies.
-
-**Core technologies (additions only):**
-- `@biomejs/biome@^2.4.6` (exact pin): lint + format + import sort — single Rust binary, 20-100x faster than ESLint+Prettier, first-class TypeScript inference in v2, `biome ci` command designed for read-only CI checks
-- `oven-sh/setup-bun@v2` (GitHub Action, not npm): official Bun CI setup — version pinning, caching, PATH management
-- `mikepenz/action-junit-report@v6` (GitHub Action, not npm): JUnit XML to PR annotations — supports `<failure>` and `<error>`, inline check annotations
-
-**Critical version requirements:**
-- `@biomejs/biome` must be pinned exact (`--exact`) due to rapid release cycle that adds new rules in minor versions
-- `bun install --frozen-lockfile` must be used in CI to enforce reproducible installs
+**Core technologies (v0.4 — no new dependencies):**
+- Pure TypeScript `junit-formatter.ts`: JUnit XML generation — mirrors `json-formatter.ts` exactly; no library justified for a shallow, known XML schema
+- `process.env` string preprocessing: Env var interpolation — `yaml-env-defaults` explicitly avoided because it wraps `js-yaml` (inconsistent with the `yaml` package already in use)
+- `actions/checkout@v4` + `oven-sh/setup-bun@v2`: PR workflow actions — already in project at these versions; no upgrade for consistency
 
 ### Expected Features
 
-**Must have (table stakes) — what makes this milestone complete:**
-- JSON output (`--output json`) — every CI tool expects machine-readable output; `RunResult` maps directly to the schema; single JSON object to stdout on completion, human progress always on stderr
-- JUnit XML output (`--output junit`) — universal CI reporting format consumed by GitHub Actions, Jenkins, GitLab, CircleCI; hand-crafted with template literals and an `escapeXml()` helper; `<properties>` per testcase carry SuperGhost-specific `source` and `selfHealed` metadata
-- Biome linting/formatting — code quality gate without Biome makes all other CI enforcement advisory; must come first so all v0.3 code is lint-clean from the start
-- GitHub Actions PR workflow (`ci.yml`) — three parallel jobs (lint, typecheck, test); no E2E in PR gate (requires secrets, is slow and non-deterministic); required status checks in branch protection lock the quality gate
-- Env var interpolation (`${VAR}` syntax) — CI environments pass secrets via env vars; hardcoding in YAML is a security anti-pattern; Docker Compose `${VAR}`, `${VAR:-default}`, `${VAR:?error}` syntax
-- Contributor docs (CONTRIBUTING.md, SECURITY.md, issue/PR templates) — absent documentation signals the project is not ready for contributions; GitHub surfaces community health scores
+All four v0.4 features are P1 table stakes. CI/CD users treat JUnit XML, env var interpolation, and PR merge gates as prerequisites for adopting any test framework in a real pipeline. Contributor docs (CONTRIBUTING.md, SECURITY.md, issue templates, PR template) are required by GitHub's community health checklist and necessary for npm package trust signals.
 
-**Should have (differentiators):**
-- Simultaneous human + machine output (stderr for humans always active while `--output json/junit` writes to stdout) — architecturally superior to the reporter-switching pattern in Jest/Vitest/Playwright
-- `version: 1` field in JSON output — enables schema evolution; most tools dump unversioned JSON and break consumers on updates
-- JUnit XML `<properties>` with `source` (cache/ai) and `selfHealed` metadata — unique to AI-driven testing; no other tool reports cache vs AI execution source
-- `${VAR:?error}` required variable syntax with descriptive error messages — genuine CI DX differentiator vs. silent empty-string substitution
+**Must have (table stakes):**
+- JUnit XML output (`--output junit`) — every CI system (Jenkins, GitHub Actions, GitLab CI, CircleCI) natively ingests JUnit XML; without it, SuperGhost cannot integrate into standard CI dashboards
+- Env var interpolation (`${VAR}`) — CI configs cannot safely reference API keys or base URLs without it; hardcoded secrets in YAML are a non-starter
+- PR workflow (`ci.yml` or `pr.yml`) — merge gates blocking on lint/typecheck/test failure are standard CI hygiene; their absence signals an immature project
+- CONTRIBUTING.md + SECURITY.md — GitHub community health checklist; required for external contributions and npm package trust
 
-**Defer to v0.4+:**
-- `--output-file <path>` flag — shell redirection (`> results.xml`) handles this; only add if users request
-- TAP output format — poor CI adoption; JSON + JUnit cover all real-world needs
-- `dorny/test-reporter` GitHub Action integration in ci.yml — easy to add once JUnit XML exists
-- Multiple simultaneous output formats — complexity with near-zero demand; cached replay makes second run instant
-- HTML report output — scope creep; Allure and similar tools consume JUnit XML to generate HTML
+**Should have (differentiators within v0.4):**
+- `${VAR:-default}` fallback syntax — smooth local dev without requiring every env var to be set; Docker Compose parity
+- Undefined var error with actionable message — fail with named variable and exit code 2, not generic config error
+- JUnit XML `<properties>` for SuperGhost metadata (model, provider) — CI dashboards surface this; distinguishes SuperGhost reports from generic test runners
+- Issue templates (bug report, feature request) + PR template — improves bug report signal and reduces reviewer friction
+
+**Defer (v2+):**
+- `.env` file auto-loading — creates shell env vs. file ambiguity; document "use direnv" as the alternative
+- JUnit XML test attachments/screenshots — requires non-standard extensions most CI tools do not render
+- Parallel job matrix in PR workflow — premature before parallel execution is supported in the runner
 
 ### Architecture Approach
 
-v0.3 requires no changes to the core engine (TestRunner, TestExecutor, CacheManager, AI agent subsystem, Reporter interface). All additions are additive: two new output formatters, one new config processing layer, one new config file, one new workflow file, and documentation. The `ConsoleReporter` always runs on stderr for human-readable progress. JSON and JUnit formatters are not Reporter implementations — they are batch transformers that receive the completed `RunResult` after the run completes and write a single atomic output to stdout. This design preserves live progress feedback while enabling machine-readable output simultaneously.
+All four v0.4 features integrate at well-defined, isolated seams in the current architecture without touching the runner, agent, cache, or infra layers. The JUnit formatter follows the `json-formatter.ts` batch-function pattern exactly: a pure function receiving the complete `RunResult` after the run completes and returning a string, called once in `cli.ts` after `runner.run()` resolves. Env var interpolation inserts as a string-preprocessing layer in `src/config/loader.ts` between `file.text()` and `YAML.parse()` — matching the approach used by Docker Compose, GitHub Actions, and CircleCI. The PR workflow is a new `.github/workflows/pr.yml` file with no modifications to existing workflows.
 
-**Major components (new in v0.3):**
-
-1. `src/output/json-formatter.ts` — transforms `RunResult` into versioned JSON schema; writes single JSON object to stdout via `Bun.write(Bun.stdout, ...)`; exports `formatJson(runResult)` and `writeJsonToStdout(json)`
-2. `src/output/junit-formatter.ts` — transforms `RunResult` into JUnit XML; hand-crafted with `escapeXml()` helper; `<properties>` per testcase; `time` in seconds (not ms); writes to stdout
-3. `src/config/interpolate.ts` — recursively walks parsed YAML object (post-`YAML.parse`, pre-Zod) replacing `${VAR}`, `${VAR:-default}`, `${VAR:?error}` patterns with `process.env` values; throws `ConfigLoadError` with named variable on missing required vars
-4. `biome.json` — single configuration file replacing ESLint + Prettier; 2-space indentation, 100-char line width, recommended rules
-5. `.github/workflows/ci.yml` — three parallel jobs: lint (`biome ci`), typecheck (`tsc --noEmit`), test (`bun test`); triggers on `pull_request` and `push` to main
-
-**Modified components:**
-- `src/cli.ts` — adds `--output <format>` option (choices: json, junit); dispatches to formatters after `runner.run()`; `program.configureOutput()` redirects Commander stdout to stderr to prevent pollution
-- `src/config/loader.ts` — inserts `interpolateEnvVars(raw)` call between `YAML.parse()` and `ConfigSchema.safeParse()`
-- `package.json` — adds Biome devDependency, lint/lint:fix/format scripts
-
-**Unchanged components:** TestRunner, TestExecutor, ConsoleReporter, Reporter interface, CacheManager, AI agent subsystem, Config schema.
+**Components and their v0.4 impact:**
+1. `src/output/junit-formatter.ts` (new, ~80 lines) — pure function `formatJunitOutput(RunResult) → string`; sibling to `json-formatter.ts`; also exports `formatJunitDryRun` and `formatJunitError` variants
+2. `src/config/loader.ts` (modified, ~15 lines) — `interpolateEnvVars()` private function called between `file.text()` and `YAML.parse()`; throws `ConfigLoadError` on undefined variables
+3. `src/cli.ts` (modified, ~20 lines) — extend `--output` validation from `"json"` to `["json", "junit"]`; add three parallel JUnit output blocks; import `formatJunit*` functions
+4. `.github/workflows/pr.yml` (new, ~25 lines) — lint + typecheck + test on `pull_request` to `main`; single `gate` job for branch protection stability
+5. Five contributor doc files (new, documentation only) — `CONTRIBUTING.md`, `SECURITY.md`, two issue templates, PR template
 
 ### Critical Pitfalls
 
-1. **stdout pollution in JSON/JUnit mode** — Commander.js writes `--help` and `--version` to stdout by default; any `console.log` or third-party library writing to stdout corrupts the machine-readable output. Prevention: call `program.configureOutput({ writeOut: writeStderr, writeErr: writeStderr })` before argument parsing; add integration test that pipes `--output json` through `JSON.parse()` for both success and error exit paths.
+1. **JUnit XML missing `classname` attribute** — CI tools silently drop or misgroup test results; `classname` is technically optional in some XSD schemas but required by every real CI tool. Set `classname` to the config file name on every `<testcase>` element. Validate by uploading to GitHub Actions `dorny/test-reporter`.
 
-2. **JUnit XML `classname` omission causing silent result loss** — GitHub Actions, GitLab CI, Jenkins, and CircleCI all require the `classname` attribute on `<testcase>` elements; omitting it causes tools to silently drop tests with no error. Prevention: always set `classname="superghost"` (or config filename); validate generated XML by uploading to GitHub Actions and confirming test summary displays all tests.
+2. **ANSI escape codes and control characters in failure bodies** — `\x1B` (the escape character from `picocolors` color output) is an illegal XML 1.0 character; it produces unparseable XML that only breaks when tests fail (a confusing silent-until-real-failure failure mode). Strip ANSI sequences (`/\x1B\[[0-9;]*[a-zA-Z]/g`) and all control characters below `\x20` (except tab, newline, carriage return) from every dynamic string before writing into XML. This is a documented recurring bug in pytest, mocha, bats, and OpenShift.
 
-3. **Env var interpolation before YAML parsing breaks on YAML-special characters** — if `${DB_PASS}` resolves to `foo:bar#baz` and interpolation runs on the raw YAML string, YAML parsing interprets `foo:bar#baz` as a mapping. Prevention: parse YAML first to get JS object, then walk the object and replace `${VAR}` patterns in string values only (post-parse, not pre-parse).
+3. **JUnit XML `time` in milliseconds instead of seconds** — `TestResult.durationMs` divided by 1000 is a one-line conversion that is easy to forget. CI tools accept the wrong value silently, displaying test durations as hours. Unit test: 1500ms produces `time="1.500"`.
 
-4. **Biome formatting explosion blocks in-flight branches** — adding Biome to an existing 3,787 LOC codebase without sequencing produces a mass formatting commit that creates merge conflicts on all active branches. Prevention: Biome setup must be the first commit of the milestone, on main, before any feature branches exist.
+4. **Env var secrets leaking into cache metadata** — resolved values from interpolation must not flow into `.superghost-cache/` JSON metadata fields. Store the template form (`${VAR}`) in human-readable metadata; use the resolved value only for hash computation and runtime execution. High recovery cost: secrets committed to git require key rotation and history rewriting.
 
-5. **GitHub Actions required check name mismatch blocks all PRs** — required status check names in branch protection are case-sensitive composite strings (`CI / lint`); any workflow or job rename silently orphans the required check. Prevention: add a single `gate` job with `needs: [lint, typecheck, test]` and make only that job required in branch protection settings.
-
-6. **Env var secrets leaking into cache files** — resolved env var values (API keys, tokens) flow into `CacheManager` and end up in `.superghost-cache/` JSON files, potentially committed to git. Prevention: store template form (`${API_BASE_URL}`) in cache metadata; use resolved values only for hash computation and runtime execution.
+5. **GitHub Actions `pull_request_target` secret exposure** — using `pull_request_target` instead of `pull_request` grants fork PRs access to repository secrets, enabling secret exfiltration. Use `pull_request` exclusively for CI lint/test workflows that need no secrets.
 
 ---
 
 ## Implications for Roadmap
 
-Based on combined research, the dependency graph produces a clear six-phase build order. All dependencies flow in one direction with no cycles. Each phase delivers standalone value and the ordering is enforced by real dependency constraints, not preference.
+Based on combined research, the four features map naturally to four sequential phases. All are small and independent, but ordering matters: the PR workflow is most valuable after the code features exist (so CI validates them), and contributor docs must be written after all tooling is finalized (so commands documented in CONTRIBUTING.md match actual repository state).
 
-### Phase 1: Biome Setup and Code Formatting Baseline
+### Phase 10: JUnit XML Formatter
 
-**Rationale:** Biome must be the first commit of the milestone. Running it after any feature code is written risks a mass formatting diff that conflicts with in-flight branches and makes git blame useless. The formatting baseline must exist before any feature code is committed. Every subsequent commit benefits from enforced style.
+**Rationale:** Pure function with no dependencies on other v0.4 features. The `json-formatter.ts` pattern is already proven and the `--output` seam in `cli.ts` is already prepared from Phase 9. This is the highest-value CI integration feature — once shipped, SuperGhost results appear natively in Jenkins, GitHub Actions test summary, GitLab CI, and CircleCI dashboards.
+**Delivers:** `src/output/junit-formatter.ts` plus CLI wiring in `src/cli.ts`; `--output junit` flag produces spec-compliant XML consumable by all major CI systems
+**Addresses:** JUnit XML output (P1 table stakes), `<properties>` metadata (P2 differentiator)
+**Avoids:** Missing `classname` attribute, ANSI control chars in failure bodies, milliseconds-not-seconds `time` attribute, XML injection from unescaped special characters — all four must be unit-tested before the formatter ships
 
-**Delivers:** `biome.json`, `@biomejs/biome` devDependency (exact pin), lint/lint:fix/format npm scripts, one-time `biome check --write .` formatting commit on main, verified 0 violations in CI.
+### Phase 11: Env Var Interpolation
 
-**Addresses:** Biome linting/formatting table-stakes feature from FEATURES.md.
+**Rationale:** Fully self-contained change to `loader.ts`. Foundational for CI-safe configs: once implemented, the PR workflow can reference `${ANTHROPIC_API_KEY}` and all documentation examples can demonstrate interpolated configs safely. The secret leakage concern (resolved values in cache metadata) must be designed in from the start, not retrofitted.
+**Delivers:** `${VAR}` and `${VAR:-default}` interpolation in YAML configs; fail-fast error on undefined vars naming the missing variable; exit code 2 on config errors consistent with existing taxonomy
+**Addresses:** Env var interpolation (P1 table stakes), `${VAR:-default}` fallback (P2), actionable error messages (P2)
+**Avoids:** Secrets leaking into cache metadata (store template form, not resolved value), silent empty-string substitution on undefined vars, `${VAR:-default}` parsing edge cases with special characters (`:`, `@`, `/`) in default values
 
-**Avoids:** Biome formatting explosion pitfall (PITFALLS.md Pitfall 5). Phase 5 PR workflow depends on Biome existing.
+### Phase 12: GitHub Actions PR Workflow
 
-**Research flag:** No deeper research needed. Biome v2 setup is fully documented.
+**Rationale:** Best added after phases 10 and 11 so the workflow validates real functionality. Uses `pull_request` trigger exclusively — no secrets needed or granted, fork PRs work correctly. A single `gate` job depending on lint + typecheck + test must be the only required status check, preventing job rename from silently blocking all PRs.
+**Delivers:** `.github/workflows/pr.yml` running lint, typecheck, and unit tests on every PR to `main`; single `gate` job as the required status check
+**Addresses:** PR workflow with test gates (P1 table stakes)
+**Avoids:** `pull_request_target` secret exposure, required check name mismatch from per-job branch protection, E2E tests in PR workflow (stays in `e2e.yml`)
 
----
+### Phase 13: Contributor Docs
 
-### Phase 2: JSON Output Format
-
-**Rationale:** Simpler of the two output formats. Validates the `--output <format>` CLI flag infrastructure and the batch-formatter architecture (transform `RunResult` post-run, write once to stdout) before JUnit XML reuses both. Provides immediate CI/CD value to users who pipe to `jq` or consume output in custom scripts.
-
-**Delivers:** `src/output/json-formatter.ts`, `--output <format>` CLI flag with `json` choice, Commander `configureOutput()` stdout redirect, integration tests verifying JSON validity on both success and error exit paths. JSON schema includes `version: 1` and `success: boolean` at top level.
-
-**Addresses:** JSON output table-stakes, `version: 1` schema field differentiator, simultaneous human+machine output differentiator.
-
-**Avoids:** Pitfall 1 (stdout pollution from Commander), Pitfall 7 (missing schema version field). PITFALLS.md is explicit: config errors must also produce valid JSON on stdout with a top-level `error` field when `--output json` is active.
-
-**Research flag:** No deeper research needed. Pattern is established.
-
----
-
-### Phase 3: JUnit XML Output Format
-
-**Rationale:** Same formatter architecture as JSON, reuses the `--output` flag infrastructure validated in Phase 2. More complex due to XML escaping requirements and the `classname`/`time` format pitfalls, which is why it comes after JSON.
-
-**Delivers:** `src/output/junit-formatter.ts`, `junit` choice added to `--output`, `escapeXml()` helper (5-character escape: `&<>"'`), `<properties>` per testcase with `source` and `selfHealed`, integration test verifying XML in GitHub Actions test summary.
-
-**Addresses:** JUnit XML table-stakes, `<properties>` metadata differentiator.
-
-**Avoids:** Pitfall 2 (`classname` attribute omission causes silent result loss), time format pitfall (`time` must be seconds as float, not milliseconds), XML escaping pitfall (test names with `<>&"'` must be escaped).
-
-**Research flag:** No deeper research needed. testmoapp/junitxml spec is authoritative.
-
----
-
-### Phase 4: Env Var Interpolation
-
-**Rationale:** Fully independent of output formats and CI setup — operates in the config loader layer, not the output layer. Placed after output formats so it benefits from established lint enforcement. Needs careful implementation due to ordering constraint (post-parse, not pre-parse), secret leakage concern, and syntax edge cases.
-
-**Delivers:** `src/config/interpolate.ts` with recursive `interpolateEnvVars()` (walks parsed JS object, not raw YAML string), `src/config/loader.ts` modified to call interpolation between `YAML.parse()` and `ConfigSchema.safeParse()`, unit tests covering all syntax variants (basic substitution, default values, required vars, escape sequences, missing vars, nested objects, arrays).
-
-**Addresses:** Env var interpolation table-stakes, `${VAR:?error}` required-variable differentiator, `${VAR:-default}` default-value differentiator.
-
-**Avoids:** Pitfall 3 (pre-parse interpolation breaks on YAML-special chars), Pitfall 6 (literal `$` ambiguity — only `${VAR}` braced syntax supported, never bare `$VAR`), secret leakage into cache files (store template form in metadata).
-
-**Research flag:** No deeper research needed. Docker Compose interpolation is the reference. One design decision to make explicit: `${VAR}` with unset var should throw (exit 2 with named var in error), not silently substitute empty string.
-
----
-
-### Phase 5: GitHub Actions PR Workflow
-
-**Rationale:** Depends on Biome being set up (lint job calls `biome ci`) and on test infrastructure being stable (test job runs `bun test`). Placed last among code features so the workflow CI-tests all features from Phases 1-4. Job names must be finalized before branch protection is configured.
-
-**Delivers:** `.github/workflows/ci.yml` with three parallel jobs (lint, typecheck, test), `gate` job depending on all three for branch protection, lint step added to `release.yml`, branch protection configuration guide in CONTRIBUTING.md.
-
-**Addresses:** PR workflow with test gates table-stakes, "CI provided out-of-the-box" differentiator.
-
-**Avoids:** Pitfall 4 (check name mismatch — use a single `gate` job as the required check, not individual jobs), E2E tests in PR gate anti-pattern (keep E2E on `workflow_dispatch` + weekly schedule in existing `e2e.yml`), `pull_request_target` trigger security issue (use `pull_request` for fork PRs).
-
-**Research flag:** No deeper research needed. Three-job parallel CI with Bun is a standard pattern.
-
----
-
-### Phase 6: Contributor Documentation
-
-**Rationale:** Must be written last. CONTRIBUTING.md references Biome commands (Phase 1), output format flags (Phases 2-3), env var syntax (Phase 4), and the CI workflow (Phase 5). Writing it before those features exist guarantees docs will be stale on day one.
-
-**Delivers:** `CONTRIBUTING.md` (dev setup, linting, testing, PR process, all with `bun`/`bunx` commands — never npm/npx), `SECURITY.md` (real security contact, 48h acknowledgment commitment), `.github/ISSUE_TEMPLATE/bug_report.yml`, `.github/ISSUE_TEMPLATE/feature_request.yml`, `.github/PULL_REQUEST_TEMPLATE.md`.
-
-**Addresses:** Contributor docs table-stakes.
-
-**Avoids:** CONTRIBUTING.md using npm/npx instead of bun/bunx, SECURITY.md without a real contact.
-
-**Research flag:** No deeper research needed. GitHub community health file conventions are fully documented.
-
----
+**Rationale:** Must be written last. CONTRIBUTING.md references the PR workflow (Phase 12), Biome lint commands, `--output junit` (Phase 10), and env var interpolation syntax (Phase 11). Writing it before those features are finalized guarantees stale documentation. Every command in CONTRIBUTING.md must be verified by executing it verbatim on a clean `git clone`.
+**Delivers:** `CONTRIBUTING.md`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/feature_request.md`, `.github/PULL_REQUEST_TEMPLATE.md`
+**Addresses:** Contributor docs (P1 table stakes), issue templates (P2), PR template (P2)
+**Avoids:** Documenting non-existent or renamed commands, using `npm`/`npx` instead of `bun`/`bunx`, omitting `bunx playwright install chromium`, CI check name mismatches in the PR checklist
 
 ### Phase Ordering Rationale
 
-- **Biome first:** formatting baseline before any feature code prevents style noise in PRs and merge conflicts on active branches.
-- **JSON before JUnit:** simpler format validates the `--output` flag and batch-formatter architecture; JUnit reuses both without re-designing them.
-- **Env var interpolation fourth:** independent of output formats; benefits from lint enforcement; needs more careful implementation than output formats (ordering constraint, secret leakage).
-- **PR workflow fifth:** requires Biome (lint job), stable job names before branch protection, and real features to gate.
-- **Docs last:** documents the final state, not an intermediate state; references all tooling and workflows built in phases 1-5.
+- Phases 10 and 11 are fully independent of each other and could be implemented in either order or in parallel; the recommended sequential ordering is for implementation focus, not technical necessity
+- Phase 12 (PR workflow) benefits from phases 10 and 11 being complete so the CI workflow exercises real `--output junit` and interpolation functionality in its test gate
+- Phase 13 (contributor docs) is non-negotiably last — this is a hard constraint identified by research; docs written before tooling is final describe the wrong commands and give contributors a broken first experience
 
 ### Research Flags
 
-No phases in this milestone require `/gsd:research-phase` during planning. All implementation patterns are fully documented and integration points are precisely identified in the existing source. This is an execution milestone, not a discovery milestone.
+No phases in this milestone require `/gsd:research-phase` during planning. All technical decisions are fully resolved in the existing research files. This is an execution milestone, not a discovery milestone.
 
-Standard patterns confirmed for all phases:
-- **Phase 1 (Biome):** Official Biome v2 docs are comprehensive; one-time calibration run may be needed to identify rules conflicting with existing patterns (e.g., `noNonNullAssertion` in AI SDK wrappers).
-- **Phase 2 (JSON output):** Hand-crafted JSON serialization of existing types; Jest/Vitest precedent well-established.
-- **Phase 3 (JUnit XML):** testmoapp/junitxml spec is authoritative; `classname` and `time` format requirements explicitly documented.
-- **Phase 4 (Env var interpolation):** Docker Compose is the reference implementation; regex pattern is trivial.
-- **Phase 5 (GitHub Actions):** Three-job parallel CI with Bun is fully documented.
-- **Phase 6 (Docs):** Documentation-only; no implementation research needed.
+Phases with standard patterns confirmed (skip additional research):
+- **Phase 10 (JUnit XML):** JUnit XML schema is fully documented in testmoapp/junitxml; `json-formatter.ts` is the direct pattern template; all edge cases enumerated in PITFALLS.md
+- **Phase 11 (Env var interpolation):** Pattern is standard across Docker Compose, GitHub Actions, CircleCI; implementation is ~15 lines; all edge cases documented including the token-parser requirement for `${VAR:-default}` with special chars in defaults
+- **Phase 12 (PR workflow):** Pattern established by existing `release.yml` and `e2e.yml`; no new actions needed; all security considerations documented
+- **Phase 13 (Contributor docs):** Documentation task; GitHub community health file requirements are fully specified by official GitHub docs
 
 ---
 
@@ -204,44 +126,45 @@ Standard patterns confirmed for all phases:
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All versions verified against npm registry and official docs. Biome v2.4.6 confirmed via changelog. oven-sh/setup-bun@v2 and mikepenz/action-junit-report@v6 verified on GitHub Marketplace. JUnit XML format verified against testmoapp/junitxml spec. All alternative libraries evaluated with specific reasons for rejection. |
-| Features | HIGH | Conventions verified against Jest, Vitest, Playwright, Docker Compose, and GitHub docs. `--output json` and `--output junit` patterns are industry-standard. Biome v2 is well-documented. Env var interpolation syntax matched to Docker Compose reference. Anti-features documented with clear rationale. |
-| Architecture | HIGH | Based on direct codebase analysis (all key files read). Integration points identified at file and function level. All architectural decisions are additive; no core subsystem changes required. Reporter interface confirmed as correct abstraction for output format dispatch. |
-| Pitfalls | HIGH | All pitfalls sourced from real GitHub issues (npm CLI stdout corruption in npm/cli#2150, JUnit classname requirement in eslint/eslint#11068) and Biome migration guides. Commander.js stdout behavior verified against Commander source. Env var secret leakage documented against real-world CI patterns. |
+| Stack | HIGH | No new dependencies; existing stack is validated. JUnit XML schema confirmed against testmoapp/junitxml authoritative spec. Existing workflow action versions confirmed in repository. `yaml-env-defaults` explicitly evaluated and rejected for sound technical reasons. |
+| Features | HIGH | JUnit XML, env interpolation, and GitHub Actions conventions are stable and well-documented. All anti-features documented with rationale. Contributor doc requirements confirmed from official GitHub docs. |
+| Architecture | HIGH | Based on direct source code inspection of `src/cli.ts`, `src/output/json-formatter.ts`, `src/config/loader.ts`, `src/runner/types.ts`, and existing workflows. Integration points are precise to file and line level. |
+| Pitfalls | HIGH | JUnit XML pitfalls confirmed by documented bugs in multiple OSS projects (pytest, mocha, bats, OpenShift, GitLab). Secret exposure pitfall confirmed by GitHub Security Lab. Check name mismatch confirmed by GitHub Actions documentation. ANSI/XML issue confirmed by Jenkins JUnit plugin issue tracker. |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-**Post-parse vs pre-parse env var interpolation (design decision, not a research gap):** STACK.md recommends pre-parse (regex on raw YAML string, simpler); ARCHITECTURE.md recommends post-parse (walk parsed JS object, safer). PITFALLS.md settles this: pre-parse interpolation breaks when env var values contain YAML-special characters (`#`, `:`, `[`, `{`). **Decision: post-parse is correct.** Parse YAML first, then walk the object. This matches ARCHITECTURE.md's recommendation.
+- **`${VAR:-default}` parser implementation approach:** Research recommends a proper token parser (track brace depth, split on first `:-`) rather than a single regex for the default-value syntax. The naive regex breaks on URLs in defaults containing `:`. This implementation decision must be locked before phase 11 begins — the design choice affects the scope estimate.
 
-**Biome rule conflicts with existing code:** MEDIUM confidence area. The existing 3,787 LOC codebase was written without a linter. Running `biome check .` before writing `biome.json` will identify how many violations exist and which rules need `"warn"` overrides (particularly `noNonNullAssertion` in AI agent code and `.ts` extension imports required by Bun). This is a one-time calibration step in Phase 1, not a blocking uncertainty.
+- **JUnit XML `<properties>` field availability:** Research identifies SuperGhost model/provider metadata in `<properties>` as a P2 differentiator, but the current `RunResult` type may not expose this data directly. Verify field availability during phase 10 planning before committing to the feature.
 
-**Secret leakage in cache metadata:** PITFALLS.md flags that storing resolved env var values in cache file metadata exposes secrets. The mitigation (store template form in metadata, resolved form only in hash) requires coordination between `src/config/interpolate.ts` and `CacheManager`. This interaction should be explicitly designed during Phase 4, not left to the implementation phase to discover.
+- **Commander.js stdout redirect coverage for `--output junit`:** Phase 9 added `configureOutput()` to redirect Commander's help/version text from stdout to stderr. Research flags that this must also cover `--output junit` mode. Verify the existing implementation covers all Commander output paths before phase 10 closes.
 
 ---
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [testmoapp/junitxml](https://github.com/testmoapp/junitxml) — JUnit XML format spec, element/attribute reference, classname requirement
-- [Biome v2 official documentation](https://biomejs.dev/) — v2 features, `biome ci` command, TypeScript inference, changelog confirming v2.4.6
-- [Docker Compose interpolation reference](https://docs.docker.com/reference/compose-file/interpolation/) — `${VAR}`, `${VAR:-default}`, `${VAR:?error}`, `$$` escape syntax
-- [oven-sh/setup-bun GitHub Action](https://github.com/oven-sh/setup-bun) — v2, verified on GitHub Marketplace
-- [mikepenz/action-junit-report](https://github.com/mikepenz/action-junit-report) — v6, JUnit XML to PR annotations
-- SuperGhost codebase direct analysis — `src/cli.ts`, `src/output/reporter.ts`, `src/output/types.ts`, `src/runner/types.ts`, `src/config/loader.ts`, `src/config/schema.ts`
+- [testmoapp/junitxml](https://github.com/testmoapp/junitxml) — authoritative JUnit XML format specification, element/attribute reference, `classname` requirement
+- [Docker Compose variable interpolation](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/) — canonical `${VAR}` and `${VAR:-default}` conventions
+- [GitHub Community Health Files](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/creating-a-default-community-health-file) — contributor doc placement and requirements
+- [GitHub Actions secure use reference](https://docs.github.com/en/actions/reference/security/secure-use) — `pull_request` vs `pull_request_target` security guidance
+- [GitHub Security Lab: preventing pwn requests](https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/) — `pull_request_target` secret exfiltration documentation
+- SuperGhost codebase direct inspection: `src/cli.ts`, `src/output/json-formatter.ts`, `src/runner/types.ts`, `src/config/loader.ts`, `.github/workflows/release.yml`, `.github/workflows/e2e.yml`
 
 ### Secondary (MEDIUM confidence)
-- [Vitest reporters documentation](https://vitest.dev/guide/reporters) — JSON reporter conventions, stdout output pattern
-- [Jest CLI options](https://jestjs.io/docs/cli) — `--json` flag behavior, stderr for human output
-- [GitHub Docs: Required status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks) — PR gate configuration, check name matching
-- [GitHub Docs: Community health files](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/creating-a-default-community-health-file) — SECURITY.md, CONTRIBUTING.md placement
-- [GitHub community: stuck "Expected" status checks](https://github.com/orgs/community/discussions/26698) — check name mismatch issue documentation
+- [actions/checkout releases](https://github.com/actions/checkout/releases) — version confirmation (v6 latest but v4 pinned in project; keep consistent)
+- [GitHub Actions PR workflow guide 2026](https://oneuptime.com/blog/post/2026-02-02-github-actions-pull-requests/view) — trigger event types and job structure
+- [JUnit XML format guide — Gaffer](https://gaffer.sh/blog/junit-xml-format-guide/) — element and attribute reference
+- [string-env-interpolation npm](https://www.npmjs.com/package/string-env-interpolation) — confirms standard regex pattern; validates that no library is justified for this use case
 
-### Tertiary (LOW confidence)
-- [npm/cli issue #2150](https://github.com/npm/cli/issues/2150) — stdout pollution with `--json` flag, real-world evidence for Pitfall 1 (issue is from npm CLI, not SuperGhost, but the Commander.js mechanism is the same)
-- [eslint/eslint issue #11068](https://github.com/eslint/eslint/issues/11068) — JUnit classname requirement evidence; issue is from 2019 but the JUnit format constraint is stable
-- [Tips on adding JSON output to CLI apps](https://blog.kellybrazil.com/2021/12/03/tips-on-adding-json-output-to-your-cli-app/) — CLI JSON output best practices; content is sound but single-author blog
+### Tertiary (informational)
+- [bats-core issue #311](https://github.com/bats-core/bats-core/issues/311) — ANSI escape codes in JUnit CDATA causing invalid XML (confirms pattern is real, recurring)
+- [mocha issue #4526](https://github.com/mochajs/mocha/issues/4526) — same ANSI/XML issue in another major test runner
+- [GitLab issue #26247](https://gitlab.com/gitlab-org/gitlab/-/issues/26247) — JUnit XML `time` in ms vs. seconds confirmed bug
+- [Jenkins JUnit plugin issue #580](https://github.com/jenkinsci/junit-plugin/issues/580) — illegal XML characters not handled; confirms ANSI chars break CI JUnit parsing
+- [OpenShift PR #27801](https://github.com/openshift/origin/pull/27801) — strip ANSI chars from JUnit XML; real-world fix for the same pitfall
 
 ---
 *Research completed: 2026-03-12*

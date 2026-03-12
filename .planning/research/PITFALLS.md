@@ -1,6 +1,6 @@
 # Pitfalls Research
 
-**Domain:** CI/CD + Team Readiness features for existing AI-powered CLI testing tool (SuperGhost v0.3)
+**Domain:** CI/CD + Team Readiness features for existing AI-powered CLI testing tool (SuperGhost v0.4)
 **Researched:** 2026-03-12
 **Confidence:** HIGH
 
@@ -8,189 +8,217 @@
 
 ## Critical Pitfalls
 
-### Pitfall 1: JSON Output Leaks Human-Readable Text into stdout Breaking Machine Parsing
+### Pitfall 1: JUnit XML Missing Required `classname` Attribute Causes CI Tools to Silently Drop Results
 
 **What goes wrong:**
-The existing `ConsoleReporter` writes everything to stderr via `writeStderr()`, and the `cli.ts` `printRunHeader()` function also writes to stderr. This is correct. However, when adding `--output json`, any code path that accidentally writes to `process.stdout` (or calls `console.log`) corrupts the JSON output. The most insidious case: third-party libraries (Commander.js help/version output, nanospinner on certain error paths) write to stdout by default. If a user runs `superghost --config tests.yaml --output json` and a Commander validation error fires, Commander writes its error message to stdout before the program can catch it. The JSON parser on the consuming end receives `error: missing required option\n{"results":[...]}` and fails.
+JUnit XML has no official specification — it originated from the JUnit ANT task and has evolved through conventions. The `classname` attribute on `<testcase>` elements is technically optional in some XSD schemas but is required by most CI tools (GitHub Actions, GitLab CI, Jenkins, CircleCI). Omitting `classname` causes some tools to silently skip the test case entirely (no error, just missing from the report). Others display the test case but fail to group it, placing everything under an unnamed root. The `testmoapp/junitxml` reference implementation documents this as a strongly recommended attribute.
 
 **Why it happens:**
-The current architecture correctly reserves stdout, but this is an implicit convention enforced only by `ConsoleReporter` and `writeStderr()`. There is no structural guarantee. Adding `--output json` makes the convention load-bearing: any violation that was previously invisible now breaks downstream consumers. Commander.js writes version output (`--version`) and help output (`--help`) to `process.stdout` by default. The existing `.exitOverride()` in `cli.ts` catches Commander errors but Commander may still write to stdout before the override fires.
-
-**How to avoid:**
-- Create a `JsonReporter` that implements the `Reporter` interface and buffers all results in memory, emitting a single JSON blob to stdout only in `onRunComplete()`.
-- Never emit partial JSON during the run. The JSON must be one atomic write at the end.
-- Override Commander's `configureOutput()` to redirect all Commander output to stderr: `program.configureOutput({ writeOut: (str) => writeStderr(str), writeErr: (str) => writeStderr(str) })`.
-- Add an integration test that pipes `--output json` output through `JSON.parse()` and asserts validity. Run this test for both success and failure scenarios.
-- Errors during the run (config load failure, API key missing) should ALSO produce valid JSON to stdout when `--output json` is active, with a top-level `error` field, then exit with the appropriate code.
-
-**Warning signs:**
-- `superghost --output json | jq .` produces parse errors
-- CI tool reports "invalid JSON" when consuming superghost output
-- JSON output contains ANSI escape codes or spinner characters
-- Running `--output json --help` dumps help text to stdout before the JSON blob
-
-**Phase to address:** JSON output format implementation. This must be the first output format added because JUnit XML reuses the same Reporter-based architecture.
-
----
-
-### Pitfall 2: JUnit XML Missing Required `classname` Attribute Causes CI Tools to Silently Drop Results
-
-**What goes wrong:**
-JUnit XML has no official specification -- it originated from the JUnit ANT task and has evolved through conventions. The `classname` attribute on `<testcase>` elements is technically optional in some XSD schemas but is **required by most CI tools** (GitHub Actions, GitLab CI, Jenkins, CircleCI). Omitting `classname` causes some tools to silently skip the test case entirely (no error, just missing from the report). Others display the test case but fail to group it, putting everything under an unnamed root. The `testmoapp/junitxml` reference implementation documents this as a strongly recommended attribute.
-
-**Why it happens:**
-SuperGhost's `TestResult` type has `testName` and `testCase` but no concept of a "class" -- it is not a Java test framework. Developers generating JUnit XML from non-Java test runners often skip `classname` because it feels like a Java-ism that does not apply. But the attribute is what CI tools use for grouping and display hierarchy. Without it, results render poorly or disappear.
+SuperGhost's `TestResult` type has `testName` and `testCase` but no concept of a "class" — it is not a Java test framework. Developers generating JUnit XML from non-Java test runners often skip `classname` because it feels like a Java-ism that does not apply. But the attribute is what CI tools use for grouping and display hierarchy.
 
 **How to avoid:**
 - Set `classname` to the config file name (e.g., `tests.yaml`) or a configurable suite name. This groups all test cases under a meaningful label.
 - Set `<testcase name="...">` to `testResult.testName`.
 - Always include `time` as seconds (float), not milliseconds. JUnit XML uses seconds with decimal precision: `time="1.234"` not `time="1234"`.
 - Include `<failure message="..." type="TestFailure">` for failed tests with the error message in the element body. Without the `message` attribute, some tools show an empty failure.
-- Wrap test suites in `<testsuites>` (plural) as the root element -- some parsers choke on `<testsuite>` as root.
+- Wrap test suites in `<testsuites>` (plural) as the root element — some parsers reject `<testsuite>` as root.
 - Validate generated XML against the Testmo XSD schema during development.
 - XML-escape all text content: test names, error messages, and case descriptions may contain `<`, `>`, `&`, `"` characters that break XML parsing.
 
 **Warning signs:**
 - GitHub Actions test summary shows 0 tests when there should be results
 - Jenkins JUnit plugin shows "No test results found"
-- CI report shows test names but no grouping/hierarchy
+- CI report shows test names but no grouping or hierarchy
 - XML parsing error in CI logs mentioning malformed XML or unescaped characters
 
-**Phase to address:** JUnit XML output format implementation. Should be built after JSON output since both share the same data flow.
+**Phase to address:** Phase 10 (JUnit XML output). Must validate against at least one real CI tool (GitHub Actions dorny/test-reporter) during testing.
 
 ---
 
-### Pitfall 3: Env Var Interpolation Exposes Secrets in Cache Files and Error Messages
+### Pitfall 2: ANSI Escape Codes and Control Characters in JUnit CDATA Produce Unparseable XML
 
 **What goes wrong:**
-Adding `${VAR}` interpolation in YAML configs lets users write `baseUrl: ${API_BASE_URL}` instead of hardcoding URLs. The resolved value flows into the config object, which flows into cache keys (`CacheManager.hashKey(testCase, baseUrl)`), cache file metadata, error messages, and potentially JSON/JUnit output. If `${API_SECRET}` or `${PRIVATE_TOKEN}` is interpolated into a test case description or context field, the resolved secret value ends up in:
-1. `.superghost-cache/` JSON files (committed to git if not in `.gitignore`)
-2. JUnit XML `<testcase>` attributes and failure messages
-3. JSON output `testCase` and `error` fields
-4. stderr error messages ("Error: baseUrl unreachable: https://secret-token@api.example.com")
+SuperGhost's `ConsoleReporter` uses `picocolors` for colored output. When AI execution produces error messages or step logs that include ANSI escape sequences (color codes beginning with `\x1B[`), and those strings flow into JUnit XML `<failure>` bodies or `<system-out>` CDATA sections, the resulting XML is unparseable. The escape character `\x1B` (U+001B) is not a legal XML 1.0 character. XML 1.0 only permits characters `\x09` (tab), `\x0A` (newline), `\x0D` (carriage return), and `\x20`-`\xD7FF`. Any other control character breaks the entire document, not just the element containing it.
+
+This is a documented, recurring bug across JUnit implementations in pytest, behave, mocha, bats, and OpenShift's test framework. The failure mode is silent at generation time (the file is written successfully) but fatal at parse time in CI.
 
 **Why it happens:**
-Env var interpolation is typically implemented as a string-replace pass over the raw YAML before or after parsing. The resolved values become indistinguishable from literal config values throughout the rest of the system. No component downstream of the config loader knows which values came from env vars vs. literals. Cache files store the full resolved `testCase` and `baseUrl` in plain JSON. The cache directory is often not in `.gitignore` because users want to commit it for deterministic CI replays.
+The `error` field on `TestResult` captures the raw error message from the AI agent or tool execution. These messages can include ANSI sequences if the underlying tool emits them. The `testCase` string in configs may also contain terminal formatting if users copy-paste from colored terminal output. JUnit XML generators that don't strip control characters before serialization produce invalid output every time one of these strings hits a failure.
 
 **How to avoid:**
-- Interpolate env vars AFTER YAML parsing but BEFORE Zod validation, so the values are validated but originate from env vars.
-- For cache key computation: hash the INTERPOLATED values (so `${API_BASE_URL}` resolving to different values in different environments produces different cache keys). This is correct behavior.
-- For cache file storage metadata: store the TEMPLATE form (`${API_BASE_URL}`) in the `testCase`/`baseUrl` metadata fields, not the resolved value. The hash uses the resolved value; the human-readable metadata uses the template.
-- For error messages and output: redact any value that came from env var interpolation in stderr error messages. At minimum, truncate to show only the var name: `baseUrl unreachable: ${API_BASE_URL} (resolved)`.
-- Add `.superghost-cache/` to the default `.gitignore` recommendation in docs and `--init` scaffolding.
-- Never interpolate env vars in test `case` descriptions sent to the AI agent. The AI does not need the secret value -- it needs the instruction. If a user writes `case: "Login with password ${SECRET}"`, that is a misuse. Warn when an env var is found inside a `case` field.
+- Create a dedicated `stripControlChars(str: string): string` utility function that removes all characters with code points below `\x20` EXCEPT tab (`\x09`), newline (`\x0A`), and carriage return (`\x0D`).
+- Apply `stripControlChars` to EVERY dynamic string value written into XML: test names, classnames, error messages, failure bodies, `<system-out>` content.
+- Strip ANSI escape sequences separately using a regex like `/\x1B\[[0-9;]*[a-zA-Z]/g` BEFORE the control character strip.
+- Add a unit test: pass a string containing `\x1B[31mfailed\x1B[0m` through the JUnit formatter and verify the output parses as valid XML.
 
 **Warning signs:**
-- Git diff shows API keys or tokens appearing in `.superghost-cache/` JSON files
-- JUnit XML report in CI artifacts contains secret values in test names
-- Error messages in CI logs expose interpolated secret URLs
-- Cache files work locally but fail in CI because the env var resolves differently (this is correct behavior, but confusing if the user expects cache portability)
+- XML parser in CI reports `illegal character code U+001B`
+- JUnit report works in some test runs (no failures) but breaks on the first failure
+- CI log shows "not well-formed XML" only when tests fail
+- `xmllint --noout results.xml` exits non-zero
 
-**Phase to address:** Env var interpolation implementation. Must be designed with the cache and output layers in mind from the start.
+**Phase to address:** Phase 10 (JUnit XML output). This must be caught in unit tests before the formatter is used in real CI runs.
 
 ---
 
-### Pitfall 4: GitHub Actions Required Check Name Mismatch Silently Blocks All PRs
+### Pitfall 3: JUnit XML `time` Attribute in Milliseconds Instead of Seconds
 
 **What goes wrong:**
-When setting up PR gates with required status checks, the check name in branch protection must EXACTLY match the job name in the workflow YAML. If the workflow has `jobs: lint:` but branch protection requires `Lint` (capitalized), every PR will hang with "Expected -- Waiting for status to be reported" and can never merge. The reverse is equally dangerous: renaming a job in the workflow YAML (e.g., from `test` to `typecheck-and-test`) causes the required check to reference a name that no longer exists, blocking all PRs until a repo admin fixes branch protection.
+SuperGhost's `TestResult.durationMs` stores duration in milliseconds. JUnit XML's `time` attribute is specified in seconds as a decimal float. Writing milliseconds directly produces values like `time="4521"` (4.521 seconds rendered as 4521 seconds = 75 minutes). CI tools do not error on this — they display the inflated value. GitLab CI has a documented issue with this exact mistake. The test run appears to have taken hours.
 
 **Why it happens:**
-GitHub Actions status check names are composed from `workflow name / job name` (e.g., `CI / lint`). Branch protection matches on these composite names, which are case-sensitive strings. There is no validation that a required check name corresponds to an existing workflow job. Renaming a workflow file, a job key, or the workflow `name:` field silently breaks the association. GitHub does not warn about orphaned required checks.
+`durationMs` is named for its unit. The division by 1000 is a one-line conversion but is easy to forget when focusing on XML structure. Because CI tools don't reject the value, the bug goes undetected until someone looks at timing data.
 
 **How to avoid:**
-- Use explicit, stable job names with the `name:` field in each job (not just the job key). Example: `jobs: lint: name: "Lint"`. This decouples the display name from the YAML key.
-- Document the exact required check names in a comment at the top of each workflow file: `# Required check: "CI / Lint"`.
-- After setting up branch protection, immediately test by creating a PR to verify all checks appear and complete.
-- Keep the number of required checks minimal. Use a single "CI" workflow with multiple jobs rather than multiple workflows. This keeps the required check list short and manageable.
-- Do NOT use path filtering (`on: push: paths:`) on workflows that contain required checks. If the workflow does not trigger (because no matching paths changed), the required check stays in "Pending" forever, blocking the PR.
-- Consider a "gate" job that depends on all other jobs (`needs: [lint, test, typecheck]`) and make only that single job required. If individual jobs are renamed, only the `needs` list changes, not branch protection.
+- In the JUnit formatter, convert with `(durationMs / 1000).toFixed(3)` to produce `"4.521"`.
+- Add a unit test asserting that a 1500ms duration produces `time="1.500"` not `time="1500"`.
+
+**Warning signs:**
+- GitHub Actions test summary shows tests taking hours
+- GitLab pipeline shows test duration wildly inconsistent with wall clock time
+- Jenkins marks test suite as having impossibly long duration
+
+**Phase to address:** Phase 10 (JUnit XML output). Simple unit test catches this before it reaches CI.
+
+---
+
+### Pitfall 4: Env Var Interpolation Exposes Secrets in Cache Files and Output
+
+**What goes wrong:**
+Adding `${VAR}` interpolation in YAML configs lets users write `baseUrl: ${API_BASE_URL}`. The resolved value flows into the config object, which flows into cache keys (`CacheManager.hashKey(testCase, baseUrl)`), cache file metadata, error messages, and JUnit/JSON output. If `${API_SECRET}` or `${PRIVATE_TOKEN}` is interpolated into a test case description or context field, the resolved secret value ends up in:
+
+1. `.superghost-cache/` JSON files (plain text on disk, potentially committed to git if the cache dir is not in `.gitignore`)
+2. JUnit XML `<testcase>` attributes and failure messages
+3. JSON output `testCase` and `error` fields
+4. stderr error messages: `"Error: baseUrl unreachable: https://secret-token@api.example.com"`
+
+This is the known concern flagged in the milestone: secret leakage in cache metadata when env vars resolve API keys.
+
+**Why it happens:**
+Env var interpolation is typically implemented as a replace pass over parsed config values. The resolved values become indistinguishable from literal config values throughout the rest of the system. No downstream component knows which values came from env vars vs. literals. The cache file stores the full resolved `testCase` and `baseUrl` in human-readable JSON. The cache directory is often committed because users want deterministic CI replays.
+
+**How to avoid:**
+- Interpolate env vars AFTER YAML parsing but BEFORE Zod validation, so the values are validated correctly.
+- For cache file storage metadata: store the TEMPLATE form (`${API_BASE_URL}`) in `testCase`/`baseUrl` metadata fields, not the resolved value. The hash uses the resolved value (so different environments produce different cache keys, which is correct behavior); the human-readable metadata uses the template.
+- For error messages: redact any value that came from env var interpolation. At minimum, show only the var name: `"baseUrl unreachable: ${API_BASE_URL} (resolved)"`.
+- Add `.superghost-cache/` to the default `.gitignore` recommendation in docs.
+- Warn when an env var is found inside a `case` field (the AI does not need the secret value — it needs the instruction text).
+
+**Warning signs:**
+- Git diff shows API keys or tokens in `.superghost-cache/` JSON files
+- JUnit XML in CI artifacts contains secret values in test names or failure bodies
+- Error messages in CI logs expose full interpolated secret URLs
+- Cache files work locally but fail in CI because env var resolves differently (correct behavior but confusing)
+
+**Phase to address:** Phase 11 (env var interpolation). Must be designed with the cache and output layers in mind from the start — cannot be retrofitted.
+
+---
+
+### Pitfall 5: Env Var Interpolation with Default/Error Syntax Creates Ambiguous Parsing Edge Cases
+
+**What goes wrong:**
+The v0.4 roadmap specifies three interpolation syntaxes: `${VAR}`, `${VAR:-default}`, and `${VAR:?error message}`. These introduce parsing ambiguity when the default value or error message itself contains special characters: `${DB_URL:-postgres://user:pass@host/db}` contains `:`, `@`, and `/` which a naive regex would misparse. `${MSG:?Please set MSG — it is required}` contains `—` and spaces. A regex like `/\$\{([^}]+)\}/g` splits on the first `}`, which fails for nested braces. A split-on-`:-` regex fails when the default value contains `:-`.
+
+Additionally: `${VAR}` syntax must NOT interpolate inside single-quoted YAML strings. YAML single-quote strings are literal — no escape processing. If a user writes `case: 'Check $50 off sale'`, that must never attempt interpolation.
+
+**Why it happens:**
+Implementing `${VAR}` alone is simple. The default-value (`:-`) and error-message (`:?`) syntaxes require a proper parser, not a single regex. The YAML quoting interaction is easy to miss because Bun's YAML parser has already stripped the quotes by the time interpolation runs on the parsed JS object — both single-quoted and double-quoted strings look the same after parsing.
+
+**How to avoid:**
+- Implement interpolation as a proper token parser rather than a single regex:
+  1. Find the outermost `${` ... `}` boundary by tracking brace depth.
+  2. Split the interior on the first `:-` or `:?` (only the first occurrence).
+  3. The part before the separator is the var name; the part after is the default/message.
+- Apply interpolation to string values in the parsed JS object (post-YAML-parse), not to the raw YAML string. This sidesteps the YAML quoting issue.
+- Limit interpolation to specific fields: `baseUrl`, `context`, `name`, `case`. Do not interpolate `timeout` (number) or `headless` (boolean).
+- On undefined `${VAR}` without a default: FAIL LOUDLY with exit code 2: `"Environment variable 'API_KEY' is not set (referenced in config field 'baseUrl')"`. Never silently substitute empty string.
+- On `${VAR:?message}` with unset var: exit code 2, show the message verbatim.
+- On `$${VAR}` (double dollar): produce literal `${VAR}`. Matches Docker Compose convention.
+- Do NOT support bare `$VAR` without braces — too many ambiguities with literal dollar signs.
+- Do NOT support nested interpolation `${VAR_${ENV}}`.
+
+**Warning signs:**
+- Test case with `$50` description silently becomes `0` or empty after interpolation
+- `baseUrl: ${DB_URL:-postgres://...}` produces a truncated URL at the first `:`
+- Undefined env var produces blank `baseUrl` that passes Zod URL validation but causes test failure with a misleading error
+- `${VAR:?This is required — set it}` truncates the message at `—`
+
+**Phase to address:** Phase 11 (env var interpolation). Syntax specification must be locked before implementation begins. Unit tests must cover each syntax variant and every edge case.
+
+---
+
+### Pitfall 6: GitHub Actions PR Workflow Uses `pull_request_target` and Exposes Secrets to Fork PRs
+
+**What goes wrong:**
+Using the `pull_request_target` event trigger (instead of `pull_request`) for PR checks causes workflow runs to execute with access to repository secrets, even for PRs from external forks. An attacker submitting a malicious PR can exfiltrate the `ANTHROPIC_API_KEY` or any other stored secret by modifying the workflow to echo it or send it to an external server. GitHub's security lab calls this a "pwn request."
+
+The SuperGhost release workflow already uses `pull_request_target` is not present, but someone adding the PR CI workflow could accidentally choose `pull_request_target` for the wrong reason (e.g., wanting to post PR comments with test results), which grants secret access.
+
+**Why it happens:**
+`pull_request_target` exists to allow workflows to post comments or update PR statuses for fork PRs (which `pull_request` cannot do, as forks have no secret access). The distinction is subtle and the GitHub documentation does not make the security implication obvious at a glance. As of November 2025, GitHub changed `pull_request_target` behavior to always use the default branch for workflow source, but secret exposure remains if checkout and code execution occur.
+
+**How to avoid:**
+- Use `pull_request` (not `pull_request_target`) for the PR CI workflow. This provides no secret access — correct behavior for lint, typecheck, and unit tests which need no secrets.
+- E2E tests requiring `ANTHROPIC_API_KEY` must NOT be required checks on PRs. Use a separate `e2e.yml` triggered by `workflow_dispatch` or `schedule` only. The existing `e2e.yml` in the repo already follows this pattern — do not break it.
+- In the new `ci.yml` workflow, do not include any step that uses `secrets.*` context. The lint/typecheck/test jobs should need no secrets at all.
+- Add a comment in the workflow file documenting why `pull_request` is used: `# Uses pull_request (not pull_request_target) — no secret access needed or granted`.
+
+**Warning signs:**
+- CI workflow uses `pull_request_target` without explicit justification
+- PR workflow step references `secrets.ANTHROPIC_API_KEY` or any other secret
+- Fork PR CI runs succeed only because secrets are available (should fail without them)
+- Security scanner flags workflow with `pull_request_target` + `actions/checkout` combination
+
+**Phase to address:** Phase 12 (GitHub Actions PR workflow). The workflow must be reviewed for secret exposure before merging.
+
+---
+
+### Pitfall 7: GitHub Actions Required Check Name Mismatch Silently Blocks All PRs
+
+**What goes wrong:**
+When setting up PR gates with required status checks, the check name in branch protection must EXACTLY match the job display name in the workflow YAML. If the workflow has `jobs: lint:` but branch protection requires `CI / Lint` (which is what GitHub displays), every PR hangs with "Expected — Waiting for status to be reported" and can never merge. The reverse is equally dangerous: renaming a job in the workflow YAML (e.g., from `test` to `typecheck-and-test`) causes the required check to reference a name that no longer exists, blocking all PRs until a repo admin updates branch protection.
+
+**Why it happens:**
+GitHub Actions status check names are composed from `workflow name / job name` (e.g., `CI / lint`). Branch protection matches on these composite strings, which are case-sensitive. There is no validation that a required check name corresponds to an existing workflow job. Renaming a workflow file, a job key, the workflow `name:` field, or the job `name:` field silently breaks the association.
+
+**How to avoid:**
+- Use a single `gate` job that `needs: [lint, typecheck, test]` and depends on all check jobs. Make ONLY the `gate` job a required check. When individual jobs are renamed, only the `needs:` list changes — branch protection is unchanged.
+- Document the exact required check name in a comment at the top of the workflow file: `# Required check name: "CI / gate"`.
+- After setting up branch protection, immediately test by creating a throwaway PR to verify the gate check appears and completes.
+- Do NOT use path filtering (`on: push: paths:`) on workflows containing required checks. If the workflow does not trigger (no matching paths changed), the required check stays "Pending" forever, blocking the PR.
 
 **Warning signs:**
 - PR stuck at "Some checks haven't completed yet" with a check showing "Expected"
 - All PRs blocked after a workflow rename or refactor
 - New contributors cannot merge even after all visible checks pass
-- Branch protection shows required checks that do not match any workflow job
+- Branch protection settings list check names that no longer match any workflow
 
-**Phase to address:** PR workflow gates setup. Must be the LAST CI/CD feature implemented, after all workflow jobs are finalized and their names are stable.
-
----
-
-### Pitfall 5: Biome Linting Retroactively Applied to Existing Codebase Creates Hundreds of Violations
-
-**What goes wrong:**
-Adding Biome (or any linter/formatter) to an existing 3,787 LOC codebase and running `biome ci` immediately fails with hundreds of violations. If this is wired into a pre-commit hook or CI check, all work on the repo is blocked until every violation is fixed. This creates a massive "stop the world" commit that touches every file, making git blame useless for the entire history and creating merge conflicts with any in-flight branches.
-
-**Why it happens:**
-Biome's default ruleset is opinionated and comprehensive (423+ rules). A codebase written without a linter will inevitably violate many rules: inconsistent formatting, import ordering, unused variables, non-null assertions, etc. Running `biome check` on the full codebase for the first time surfaces all accumulated style drift at once. The temptation is to run `biome check --write` to auto-fix everything, but this produces a single giant commit that rewrites most files.
-
-**How to avoid:**
-- Phase the rollout: first add Biome with `biome init`, configure it, and run `biome format --write .` as a single formatting-only commit. Formatting changes are cosmetic and do not change behavior -- this is the safe "big bang" commit.
-- After formatting, enable lint rules incrementally. Start with `recommended` rules and disable any that produce excessive violations using `overrides` or by setting specific rules to `"warn"` instead of `"error"`.
-- Configure `biome ci` to check only CHANGED files in CI (not the whole codebase) during the transition period: use `biome ci --changed --since=main`.
-- Do the formatting commit on main BEFORE any feature branches diverge, to avoid merge conflicts.
-- Use `biome migrate` if coming from ESLint/Prettier -- but SuperGhost has no existing linter, so start fresh.
-- Pin Biome version exactly (`-E` flag during install) to prevent rule changes across minor versions from breaking CI.
-
-**Warning signs:**
-- First `biome ci` run in CI fails with 200+ violations
-- Feature branches cannot pass CI because the linting commit was added to main after they branched
-- `git blame` on any file shows the formatting commit for every line
-- Pre-commit hook takes 5+ seconds because it checks all files, not just staged ones
-
-**Phase to address:** Linting/formatting enforcement. This should be the FIRST feature in the milestone -- before any other code changes -- so the formatting baseline is established and all subsequent changes comply.
+**Phase to address:** Phase 12 (GitHub Actions PR workflow). Workflow job names must be finalized and stable before branch protection is configured.
 
 ---
 
-### Pitfall 6: Env Var Interpolation Creates Ambiguity Between Literal `$` Characters and Variable References
+### Pitfall 8: Contributor Docs Written Before the Tooling Is Final Describe Non-Existent Commands
 
 **What goes wrong:**
-YAML config values like `case: "Check that price shows $50"` contain a literal `$` that the interpolation engine might interpret as `${50}` or choke on `$5`. A naive regex like `/\$\{([^}]+)\}/g` correctly handles `${VAR}` syntax but `/\$(\w+)/g` (bare `$VAR` syntax without braces) would falsely match `$50`, `$path`, etc. Even with the `${...}` syntax, edge cases include `$${escaped}` (should this be literal `${escaped}`?), empty `${}` (what happens?), nested `${VAR_${ENV}}` (should this be supported?), and undefined vars `${NONEXISTENT}`.
+CONTRIBUTING.md is written in Phase 13 (last), but if written before phases 10-12 are fully stable, the commands documented can be wrong in subtle ways: the lint command might change names, a test flag might be added, or the CI workflow structure might differ from what's documented. Worse, if CONTRIBUTING.md is written speculatively before all phases complete, contributors following it encounter silent failures ("my tests passed locally but CI failed") because the documented process mismatches the actual required process.
 
 **Why it happens:**
-There is no universal standard for env var interpolation in YAML. Docker Compose uses `${VAR}` and `${VAR:-default}`. Helm uses Go templates `{{ .Values.x }}`. Spring Boot uses `${VAR:default}`. Users bring assumptions from their ecosystem. The implementation must decide: what syntax is supported, what happens on undefined vars, and how to escape literal `$`.
+Contributor docs are typically written as a "wrap-up" step and the author is writing from memory or partial notes rather than following the instructions verbatim on a clean checkout. The docs describe the intended state, not the verified state. Commands like `bun run lint:fix` sound right but `lint:fix` might be named `format` in `package.json`. The CONTRIBUTING.md is the only document not testable by the CI pipeline that enforces it.
 
 **How to avoid:**
-- Support ONLY `${VAR}` syntax (with braces). Never support bare `$VAR` -- it creates too many ambiguities with literal dollar signs, shell escapes, and YAML quoting.
-- On undefined env var: FAIL LOUDLY with exit code 2 and a clear error message: `"Environment variable 'API_KEY' is not set (referenced in config field 'baseUrl')"`. Do NOT silently substitute empty string -- this creates mysterious failures downstream ("baseUrl is empty").
-- Provide an escape hatch: `$${VAR}` produces literal `${VAR}` (double dollar escapes). This matches Docker Compose convention.
-- Do NOT support default value syntax (`${VAR:-default}`) in v0.3. It adds parsing complexity and can be added later. Keep the syntax simple.
-- Do NOT support nested interpolation (`${VAR_${ENV}}`). It is rarely needed and creates a recursive parsing problem.
-- Apply interpolation to string values only. If a YAML field is typed as `number` (e.g., `timeout`), do not attempt interpolation -- the Zod schema will catch the type mismatch after interpolation.
-- Run interpolation BEFORE Zod validation so that missing/malformed env vars produce config validation errors, not runtime crashes.
+- Write CONTRIBUTING.md LAST (Phase 13 is correctly positioned). Do not write it speculatively.
+- Verify every command in CONTRIBUTING.md by executing it verbatim on a clean `git clone` into a fresh directory. Do not trust memory.
+- All setup/test/lint commands must use `bun`/`bunx`, never `npm`/`npx`. The project is Bun-native.
+- Run `bun install`, then every command documented in setup, then every command in "running tests", then every command in "linting" — in sequence, on a machine without prior state.
+- Add a "verified on" date and Bun version to CONTRIBUTING.md so staleness is detectable.
 
 **Warning signs:**
-- Test case with `$50` in the description silently becomes `0` or empty string after interpolation
-- Undefined env var produces a blank `baseUrl` that passes validation but causes test failure
-- Users confused by `$$` escaping or surprised that `$VAR` without braces is not supported
-- YAML with single-quoted strings (`'${VAR}'`) does not interpolate (YAML single quotes are literal)
+- CONTRIBUTING.md references `npm install` instead of `bun install`
+- A command in the docs exits non-zero on a clean clone
+- The setup section omits `bunx playwright install chromium` (required for browser tests)
+- The PR checklist refers to a CI check name that doesn't match the actual workflow
 
-**Phase to address:** Env var interpolation implementation. Syntax decisions must be locked before implementation begins.
-
----
-
-### Pitfall 7: JSON and JUnit Output Formats Missing Error Metadata That CI Tools Expect
-
-**What goes wrong:**
-The current `TestResult` type contains `testName`, `testCase`, `status`, `source`, `durationMs`, `error?`, and `selfHealed?`. This is sufficient for the console reporter but insufficient for CI consumption. CI tools expect: test suite name, test suite timestamp, test case class/category, number of assertions, environment info, and structured failure details. JSON consumers expect a schema version field so they can detect format changes. JUnit consumers expect `<system-out>` and `<system-err>` capture per test case. Without these, the output "works" but provides degraded value in CI dashboards.
-
-**Why it happens:**
-The `TestResult` type was designed for the `ConsoleReporter`, which only needs name, status, and error. The new output formats need richer metadata that does not exist in the current data model. Retrofitting this metadata is straightforward but easy to forget -- the JSON/JUnit reporters can only emit what `TestResult` and `RunResult` provide.
-
-**How to avoid:**
-- Extend `RunResult` with: `suiteName` (config file name or explicit name), `timestamp` (ISO 8601 run start time), `superghost version`, `model` used, `provider` used.
-- Extend `TestResult` with: `baseUrl` (the resolved base URL for this test), `testType` ("browser" | "api"), `stepCount?` (number of steps executed).
-- Add a `schemaVersion` field to JSON output (start at `1`). Increment when the JSON structure changes. This lets consumers detect format changes.
-- For JUnit XML: populate `<system-out>` with the step progression log for each test case (not the full AI conversation, just the step summaries). This gives CI dashboards drill-down capability.
-- Design the extended `RunResult`/`TestResult` types BEFORE implementing either output format. Both formatters consume the same data.
-
-**Warning signs:**
-- JSON output has no version field -- consumers cannot detect schema changes
-- JUnit XML test cases show no details beyond pass/fail
-- CI dashboard shows test results but no timing, no environment, no grouping
-- Adding a field to JSON output later breaks existing consumers (no schema version to key off)
-
-**Phase to address:** Output format data model design. Must happen before JSON or JUnit implementation begins.
+**Phase to address:** Phase 13 (contributor docs). Must be written AFTER phases 10-12 are complete, and verified on a fresh checkout.
 
 ---
 
@@ -200,33 +228,34 @@ Shortcuts that seem reasonable but create long-term problems.
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Generate JUnit XML with string concatenation instead of an XML builder | No new dependency | XML injection from test names containing `<`, `>`, `&`; breaks on non-ASCII characters | Never -- use proper XML escaping at minimum |
-| Skip JSON schema version field | Simpler JSON output | Cannot evolve the JSON format without breaking consumers; no migration path | Never |
-| Interpolate env vars with a single regex replace | Quick implementation | Breaks on `$$` escaping, nested `${}`, and literal `$` in non-string contexts | Acceptable for v0.3 if ONLY `${VAR}` syntax is supported and edge cases are tested |
-| Run `biome check` on ALL files in CI instead of changed files | Simpler CI config | Slower CI; unrelated formatting issues block PRs for code they did not touch | Acceptable after the initial formatting commit |
-| Use `--output json > results.json` as the only documented JSON usage | Simple docs | Users who want both human output AND JSON for CI must run twice | Add `--output-file` option to write structured output to a file while keeping stderr human output |
-| Configure all required checks individually in branch protection | Direct mapping | Fragile -- any job rename breaks merging | Never -- use a single gate job that `needs:` all others |
-| Store resolved env var values in cache metadata | Correct cache keying | Secrets leak into cache files on disk | Never -- store template form in metadata, resolved form only in hash |
+| Generate JUnit XML with string concatenation instead of a proper XML serializer | No new dependency | XML injection from test names containing `<`, `>`, `&`; control chars produce unparseable XML | Never — use proper XML escaping at minimum, or `fast-xml-parser` / a lightweight builder |
+| Skip JSON schema version field (already in `version` field in v0.3) | N/A — already mitigated | N/A | N/A — `version` field exists in current JSON output |
+| Interpolate env vars with a single regex replace | Quick implementation | Breaks on `${VAR:-default}` containing `:`, nested braces, and `$${escape}` | Never for the full v0.4 syntax — implement a proper token parser |
+| Use `pull_request_target` to enable PR comments | Enables richer PR feedback | Secrets exposed to fork PRs | Never for CI lint/test workflows |
+| Store resolved env var values in cache metadata | Correct cache keying | Secrets leak into cache files on disk | Never — store template form in metadata, resolved form in hash only |
+| Configure required checks per-job instead of using a gate job | Simpler initial setup | Fragile — any job rename breaks merging silently | Never — always use a single gate job |
+| Write CONTRIBUTING.md before tooling is finalized | Checks a box early | Documents wrong commands; contributors have a bad first experience | Never — write last, verify on clean clone |
 
 ---
 
 ## Integration Gotchas
 
-Common mistakes when connecting v0.3 features to the existing system.
+Common mistakes when connecting v0.4 features to the existing system.
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| `--output json` + Commander.js | Commander writes `--help` and `--version` to stdout, corrupting JSON | Use `program.configureOutput()` to redirect Commander stdout to stderr |
-| `--output json` + error paths | Config errors write to stderr but JSON consumer expects errors on stdout too | When `--output json` is active, errors must produce valid JSON on stdout with an `error` field, THEN exit |
 | `--output junit` + test name escaping | Test names containing `<`, `>`, `&`, `"` break XML | XML-escape all dynamic content: names, error messages, case descriptions |
-| Env var interpolation + Zod validation | Interpolation runs after Zod, so `${VAR}` is validated as a literal string and fails URL validation | Run interpolation BEFORE Zod `safeParse()` -- interpolate raw YAML object, then validate |
-| Env var interpolation + cache keys | Cache key uses template `${VAR}` instead of resolved value | Interpolate first, then pass resolved values to `CacheManager`. Cache must key on actual values |
-| Biome + existing CI workflows | Add `biome ci` to release workflow but not PR workflow | Add lint check to PR workflow first; release workflow inherits from passing PRs |
-| Biome + `.ts` extension imports | Biome may flag `import { X } from "./foo.ts"` depending on config | Configure Biome to allow `.ts` extensions (Bun requires them; Node does not) |
-| JUnit XML + `time` attribute | Pass milliseconds instead of seconds | JUnit XML `time` attribute is seconds as a float: `time="1.234"` not `time="1234"` |
-| PR gate workflow + E2E tests | Make E2E tests (which need `ANTHROPIC_API_KEY`) a required check on PRs | E2E tests should NOT be required on PRs -- they need secrets, cost money, and are slow. Use a separate workflow triggered by `workflow_dispatch` or `schedule` only |
-| Multiple output formats + `onRunComplete` | Reporter writes both human output and structured output in same `onRunComplete` | Create separate reporter instances: `ConsoleReporter` always writes to stderr; `JsonReporter`/`JUnitReporter` writes to stdout. Both receive the same events |
-| Contributor docs + dev setup | CONTRIBUTING.md says "run `npm install`" when project uses Bun | All setup instructions must use `bun install`, `bun test`, `bunx` -- never npm/npx equivalents |
+| `--output junit` + ANSI error messages | `error` field contains `\x1B[31m` color codes — illegal XML chars | Strip ANSI sequences AND all non-XML control characters before writing into XML |
+| `--output junit` + `time` attribute | Pass `durationMs` directly: `time="4521"` | Divide by 1000: `time="4.521"` — JUnit XML `time` is seconds as decimal |
+| `--output junit` + `classname` attribute | Omit `classname`, CI tools drop or misgroup results | Set `classname` to config file name (e.g., `tests.yaml`) |
+| Env var interpolation + Zod validation | Interpolation runs after Zod, so `${VAR}` is validated as a literal string and fails URL validation | Run interpolation BEFORE `ConfigSchema.safeParse()` — interpolate the raw parsed object, then validate |
+| Env var interpolation + cache keys | Cache key hashes the template `${VAR}` instead of the resolved value | Pass resolved values to `CacheManager.hashKey()`. Cache must key on actual runtime values. |
+| Env var interpolation + cache metadata | Resolved secret stored in `testCase`/`baseUrl` fields of cache JSON | Store the pre-interpolation template in metadata fields; only use resolved values in the hash |
+| Env var `${VAR:-default}` + YAML types | Default value `"123"` for a `timeout` (number) field passes as a string | After interpolation, Zod catches the type error. Document that env var defaults are strings and Zod coerces numbers. |
+| GitHub Actions PR workflow + E2E tests | Include `e2e:smoke` as a required PR check | E2E tests require `ANTHROPIC_API_KEY` and cost money. Keep them in `e2e.yml` (scheduled/manual only) — never required on PR |
+| GitHub Actions PR workflow + `bun install` | Use `bun install` without `--frozen-lockfile` | Use `bun install --frozen-lockfile` so CI fails loudly if `bun.lock` drifts from `package.json` |
+| `--output junit` + Commander.js | Commander `--help` or `--version` writes to stdout, corrupting JUnit XML | `configureOutput()` already redirects Commander stdout to stderr in v0.3 — verify this also covers `--output junit` |
+| Multiple output formats + `onRunComplete` | `JUnitReporter` writes to stdout while `ConsoleReporter` also writes to stdout | `ConsoleReporter` writes only to stderr. `JUnitReporter` writes only to stdout at `onRunComplete`. They can both be active simultaneously. |
 
 ---
 
@@ -236,25 +265,25 @@ Patterns that work at small scale but cause problems as the test suite grows.
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| JUnit XML building entire DOM in memory | High memory usage with large test suites | Stream XML elements sequentially; do not build a full document tree | Suites with 100+ tests producing verbose failure output |
-| JSON output buffering all results before serializing | Memory spike at end of long run | Acceptable for v0.3 (test suites are small); plan for streaming JSON Lines if suites grow | Suites with 500+ tests |
-| Env var interpolation scanning all string values recursively | Slow config loading with deeply nested configs | Only scan known string fields (baseUrl, case, context, name) | Configs with 50+ tests each with multiple string fields |
-| Biome checking all files on every commit | Slow pre-commit hook | Configure pre-commit to check only staged files: `biome check --staged --changed` | Repos with 100+ source files |
-| Single CI workflow running lint, test, typecheck sequentially | CI takes 3x longer than needed | Run lint, test, typecheck as parallel jobs in the same workflow | Any CI run -- parallel from the start |
+| Building JUnit XML DOM entirely in memory before writing | High memory usage with large test suites producing verbose failure output | Serialize elements sequentially; do not build a full document tree in memory | Suites with 100+ tests each producing multi-line failure output |
+| Env var interpolation recursively scanning all object values | Slow config loading with large test arrays | Scan only known string fields: `baseUrl`, `context`, `name`, `case` | Configs with 100+ tests each with multiple fields |
+| Single CI workflow running lint, typecheck, test sequentially | CI takes 3x longer than needed | Run lint, typecheck, test as parallel jobs from the start | Any CI run — sequential is always wasteful |
+| Installing all Playwright browsers in PR CI (`playwright install`) | Adds 2+ minutes to every PR | Install only `chromium` (`bunx playwright install chromium`) | Every PR — install all browsers only in release/e2e workflows |
 
 ---
 
 ## Security Mistakes
 
-Domain-specific security issues for this milestone.
+Domain-specific security issues for v0.4.
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| Env var interpolation resolving secrets into cache files | API keys, tokens stored in plain JSON on disk, possibly committed to git | Store template form in metadata; only use resolved values in hash computation and runtime execution |
-| JUnit XML or JSON output containing resolved env var secrets | CI artifacts expose secrets in test reports | Redact or template-ify any value that originated from env var interpolation in output |
-| YAML env var interpolation supporting `${PATH}` or `${HOME}` | Users accidentally interpolate system vars, leaking system info into cache/output | Consider a prefix requirement (e.g., only `${SUPERGHOST_*}` or `${SG_*}` vars) or at minimum document that ALL env vars are eligible |
-| GitHub Actions workflow with `pull_request_target` trigger | External PRs from forks run with write permissions and access to secrets | Use `pull_request` trigger (not `pull_request_target`) for PR checks; only use `pull_request_target` if explicitly needed for comment APIs |
-| SECURITY.md without actual security contact | Users report vulnerabilities publicly in GitHub issues | Include a real email or use GitHub's private vulnerability reporting feature |
+| Env var interpolation resolving secrets into cache metadata JSON | API keys, tokens stored in plain text on disk, possibly committed to git | Store template form `${VAR}` in metadata; use resolved values only in hash computation and runtime execution |
+| JUnit XML or JSON output containing resolved env var secrets | CI artifacts expose secrets in downloadable test reports | Avoid interpolating secrets into `name`, `case`, or `context` fields. Warn when env var appears in `case` field |
+| `${PATH}` or `${HOME}` accidentally interpolated | System paths leak into cache files and output | Document clearly that ALL env vars are eligible for interpolation — users must use specific var names |
+| GitHub Actions workflow using `pull_request_target` | External fork PRs run with secret access, enabling secret exfiltration | Use `pull_request` for CI checks; never `pull_request_target` |
+| GitHub Actions `bun install` cache key includes resolved env var values | Cache entries poisoned or leaked secrets exposed in cache metadata | Never include secret values in cache keys; use only `bun.lock` hash as cache key |
+| SECURITY.md with no real contact method | Vulnerabilities reported publicly in GitHub issues, disclosing them before a fix exists | Use GitHub's private vulnerability reporting (Settings > Security > Advisories) or provide a monitored security email |
 
 ---
 
@@ -264,12 +293,12 @@ Common user experience mistakes when adding these features.
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-----------------|
-| `--output json` replaces all output (no human feedback during run) | User sees nothing for 60+ seconds during AI execution, then gets a JSON dump | Keep stderr human output (spinner, progress) always active; JSON goes to stdout only at the end |
-| JUnit XML has no test case details beyond pass/fail | CI dashboard is useless for debugging failures | Include failure message in `<failure message="...">` and step log in `<system-out>` |
-| Env var error says "config validation failed" without mentioning which var was undefined | User has no idea which env var to set | Error message must name the var: `"Environment variable 'API_BASE_URL' is not set (referenced in 'baseUrl')"` |
-| CONTRIBUTING.md assumes deep TypeScript/Bun knowledge | New contributors bounce off setup instructions | Include exact commands, expected output, and troubleshooting for common "bun not found" issues |
-| `--output json` and `--output junit` are mutually exclusive with no way to get both | CI needs JUnit for test reporting AND JSON for custom dashboards | Support `--output-file results.xml` to write structured output to file while still emitting the other format to stdout |
-| Biome formatting changes all files on first run, confusing contributors | "I only changed one file but the diff shows 50 files" | Do the formatting commit BEFORE any contributor-facing docs; mention in CONTRIBUTING.md that formatting is enforced |
+| `--output junit` replaces all output with no feedback during run | User sees nothing for 60+ seconds during AI execution, then gets an XML dump | Keep stderr human output (spinner, progress) always active; JUnit XML goes to stdout only at the end of the run |
+| JUnit XML has no details beyond pass/fail | CI dashboard useless for debugging failures | Include failure message in `<failure message="...">` and step log in `<system-out>` |
+| Env var error says "config validation failed" without naming the undefined var | User has no idea which env var to set | Error message must name the var: `"Environment variable 'API_BASE_URL' is not set (referenced in config field 'baseUrl')"` |
+| CONTRIBUTING.md assumes deep TypeScript/Bun knowledge | New contributors bounce off setup instructions | Include exact commands, expected output, and troubleshooting for common "bun not found" and "playwright not found" issues |
+| `--output json` and `--output junit` are mutually exclusive with no way to get both | CI needs JUnit for test reporting AND JSON for custom dashboards | Consider `--output-file results.xml` to write structured output to a file while stdout serves the other format. Defer to v0.5 if not in scope |
+| Undefined env var in config fails after preflight check instead of at startup | User waits for `baseUrl` reachability check before seeing the "VAR not set" error | Interpolate and validate env vars BEFORE the preflight check — fail fast at config load time |
 
 ---
 
@@ -277,19 +306,21 @@ Common user experience mistakes when adding these features.
 
 Things that appear complete but are missing critical pieces.
 
-- [ ] **JSON output:** Often missing -- verify that config errors ALSO produce valid JSON (not just stderr text) when `--output json` is active. Test: `superghost --config nonexistent.yaml --output json | jq .`
-- [ ] **JSON schema version:** Often missing -- verify JSON output includes a `version` or `schemaVersion` field at the top level. Without it, format changes are breaking changes.
-- [ ] **JUnit XML classname:** Often missing -- verify every `<testcase>` has a `classname` attribute. Test: upload to GitHub Actions and verify tests appear in the test summary.
-- [ ] **JUnit XML time format:** Often wrong -- verify `time` attributes are in seconds (float), not milliseconds. `time="1.234"` not `time="1234"`.
-- [ ] **JUnit XML escaping:** Often missing -- verify test names with `<`, `>`, `&`, `"`, `'` characters produce valid XML. Test: create a test named `Check <script> & "quotes"` and verify XML parses.
-- [ ] **Env var undefined handling:** Often wrong -- verify undefined `${VAR}` produces exit code 2 with a clear error, not empty string substitution.
-- [ ] **Env var in cache metadata:** Often missing -- verify cache JSON files store `${VAR}` template form, not the resolved secret value.
-- [ ] **Env var literal dollar sign:** Often missing -- verify `case: "Price is $50"` works without attempting interpolation (no braces = no interpolation).
-- [ ] **Biome + `.ts` imports:** Often missing -- verify Biome does not flag Bun-style `.ts` extension imports as errors.
-- [ ] **PR gate workflow + secrets:** Often wrong -- verify PR workflow does NOT require `ANTHROPIC_API_KEY` or other secrets. Fork PRs have no access to secrets and would fail silently.
-- [ ] **CONTRIBUTING.md + Bun commands:** Often wrong -- verify all commands use `bun`/`bunx`, not `npm`/`npx`. Test: follow the doc from scratch on a clean checkout.
-- [ ] **Commander stdout redirect:** Often missing -- verify `--help` and `--version` output goes to stderr when `--output json` is active (or at least does not corrupt JSON on stdout).
-- [ ] **Multiple reporters wired correctly:** Often missing -- verify that `ConsoleReporter` (stderr) and `JsonReporter` (stdout) both receive `onTestStart`, `onTestComplete`, and `onRunComplete` events. A common bug is wiring only one.
+- [ ] **JUnit XML classname:** Often missing — verify every `<testcase>` has a `classname` attribute. Test: upload to GitHub Actions dorny/test-reporter and verify tests appear in the test summary.
+- [ ] **JUnit XML time format:** Often wrong — verify `time` attributes are seconds as float, not milliseconds. `time="1.234"` not `time="1234"`. Unit test: 1500ms duration produces `time="1.500"`.
+- [ ] **JUnit XML escaping:** Often missing — verify test names with `<`, `>`, `&`, `"`, `'` characters produce valid XML. Test: create a test named `Check <script> & "quotes"` and verify XML parses with `xmllint`.
+- [ ] **JUnit XML ANSI/control chars:** Often missing — verify error messages containing `\x1B[31m` color codes are stripped before writing into XML. Test: run a failing test and verify `xmllint --noout` passes on the output.
+- [ ] **Env var undefined handling:** Often wrong — verify undefined `${VAR}` produces exit code 2 with the var name in the error message, not empty string substitution.
+- [ ] **Env var in cache metadata:** Often missing — verify `.superghost-cache/` JSON files store `${VAR}` template form in `testCase`/`baseUrl` fields, not the resolved secret value.
+- [ ] **Env var literal dollar sign:** Often missing — verify `case: "Price is $50"` works without attempting interpolation (no braces = no interpolation).
+- [ ] **Env var default with special chars:** Often broken — verify `${DB_URL:-postgres://user:pass@host/db}` correctly produces the full Postgres URL including `://`, `:`, and `@`.
+- [ ] **PR gate workflow + secrets:** Often wrong — verify PR workflow does NOT reference `secrets.*` anywhere. Fork PRs must complete all checks successfully without any secrets.
+- [ ] **PR gate workflow + E2E tests:** Often wrong — verify `e2e:smoke` is NOT a required PR check. E2E tests belong only in the scheduled/manual `e2e.yml`.
+- [ ] **PR gate job name stable:** Often wrong — verify branch protection is configured against the `gate` job name (not individual job names) so job renames don't break merging.
+- [ ] **CONTRIBUTING.md Bun commands:** Often wrong — verify all commands use `bun`/`bunx`, not `npm`/`npx`. Follow the doc verbatim on a clean clone.
+- [ ] **CONTRIBUTING.md Playwright step:** Often missing — verify the setup section includes `bunx playwright install chromium` for contributors who need to run browser tests.
+- [ ] **Commander stdout in JUnit mode:** Often missing — verify `--output junit --help` does not write help text to stdout (it must go to stderr). The `configureOutput()` redirect from Phase 9 must also cover `--output junit`.
+- [ ] **`--output junit` exit codes:** Often missing — verify that a run with all tests passing exits 0, any test failure exits 1, and config errors exit 2 — regardless of `--output junit` being active.
 
 ---
 
@@ -299,13 +330,14 @@ When pitfalls occur despite prevention, how to recover.
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| JSON output contains non-JSON text on stdout | LOW | Identify the source (Commander, console.log, third-party lib), redirect to stderr, release patch |
-| JUnit XML missing `classname`, CI tools drop results | LOW | Add `classname` attribute, re-generate reports. No data loss -- just regenerate from next run |
-| Secrets in cache files committed to git | HIGH | Rotate exposed secrets immediately. Run `git filter-branch` or `bfg-repo-cleaner` to remove from history. Add cache dir to `.gitignore`. Add secret scanning |
-| GitHub Actions required check name mismatch blocking all PRs | MEDIUM | Repo admin updates branch protection rules to match current workflow job names. Document exact names in workflow comments |
-| Biome formatting commit conflicts with in-flight branches | MEDIUM | Each branch must rebase on main after the formatting commit. Conflicts are cosmetic (whitespace) and auto-resolvable with `git checkout --theirs` for formatting files |
-| Env var undefined produces empty string (silent failure) | MEDIUM | Add validation to fail on undefined vars. Re-run affected CI pipelines that may have passed with empty values |
-| JUnit XML time in milliseconds instead of seconds | LOW | Fix the division, re-run. CI dashboards will show corrected timing on next run |
+| JUnit XML missing `classname`, CI tools drop results | LOW | Add `classname` attribute, re-generate reports. No data loss — regenerate from next run. |
+| JUnit XML ANSI chars causing parse failure | LOW | Add `stripControlChars` function, release patch. No data lost — CI just needs a new run. |
+| JUnit XML time in milliseconds instead of seconds | LOW | Fix the division (`/ 1000`), release patch. CI dashboards correct on next run. |
+| Secrets in cache files committed to git | HIGH | Rotate exposed secrets immediately. Use `git filter-branch` or `bfg-repo-cleaner` to remove from history. Add cache dir to `.gitignore`. Enable secret scanning in repo settings. |
+| Env var undefined produces empty string (silent failure) | MEDIUM | Add fail-fast validation. Re-run affected CI pipelines that may have silently passed with empty values. |
+| GitHub Actions required check name mismatch blocking all PRs | MEDIUM | Repo admin updates branch protection to match current workflow job names. Document exact names in workflow comments. |
+| `pull_request_target` secret exposure discovered | HIGH | Rotate all exposed secrets immediately. Change trigger to `pull_request`. Audit workflow run logs for exfiltration. |
+| CONTRIBUTING.md has wrong commands | LOW | Correct the doc, create PR. No user data at risk — only contributor friction. |
 
 ---
 
@@ -315,39 +347,41 @@ How roadmap phases should address these pitfalls.
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Biome formatting explosion on existing code | Phase 1: Linting setup (do FIRST, before any feature code) | Run `biome ci` in CI; verify 0 violations on main after formatting commit |
-| JSON output stdout corruption | Phase 2: JSON output format | Integration test: pipe `--output json` through `JSON.parse()`; test error paths too |
-| JUnit XML missing classname | Phase 3: JUnit output format | Upload XML to GitHub Actions; verify test summary displays all tests |
-| JUnit XML time format (ms vs seconds) | Phase 3: JUnit output format | Unit test: assert `time` attribute value matches `durationMs / 1000` |
-| JUnit XML escaping | Phase 3: JUnit output format | Unit test: test name with `<>&"'` characters produces valid XML |
-| Env var interpolation syntax ambiguity | Phase 4: Env var interpolation | Unit test: `$50` is literal, `${VAR}` interpolates, `$${VAR}` escapes, `${}` errors |
-| Env var secrets in cache/output | Phase 4: Env var interpolation | Inspect cache JSON after run with env vars; verify no resolved secrets in metadata |
-| Env var undefined silent failure | Phase 4: Env var interpolation | Integration test: unset var in config, assert exit code 2 with named var in error message |
-| Output format data model gaps | Phase 2: Before JSON/JUnit implementation | Code review: verify `RunResult`/`TestResult` have all fields needed by both formatters |
-| GitHub Actions check name mismatch | Phase 5: PR workflow gates (do LAST) | Create test PR after setup; verify all checks appear and complete |
-| PR workflow requiring secrets | Phase 5: PR workflow gates | Create PR from a fork; verify CI checks pass without secrets |
-| CONTRIBUTING.md with wrong commands | Phase 5: Contributor docs | Follow CONTRIBUTING.md on a fresh clone; verify every command works |
-| Commander stdout in JSON mode | Phase 2: JSON output format | Test: `superghost --output json --help 2>/dev/null \| jq .` should not produce valid JSON (help goes to stderr) |
+| JUnit XML missing classname | Phase 10: JUnit XML | Upload to GitHub Actions dorny/test-reporter; verify all tests appear |
+| JUnit XML ANSI/control chars in CDATA | Phase 10: JUnit XML | Unit test: error with `\x1B[31m` color code; assert XML parses with `xmllint` |
+| JUnit XML time in milliseconds | Phase 10: JUnit XML | Unit test: 1500ms duration produces `time="1.500"` |
+| JUnit XML special char escaping | Phase 10: JUnit XML | Unit test: test name with `<>&"'` produces valid XML |
+| Env var secrets in cache metadata | Phase 11: Env var interpolation | Inspect `.superghost-cache/` JSON after run; verify `${VAR}` not resolved value in metadata |
+| Env var undefined silent failure | Phase 11: Env var interpolation | Integration test: unset var, assert exit code 2 with named var in error |
+| Env var default-value parsing edge cases | Phase 11: Env var interpolation | Unit test: `${DB_URL:-postgres://user:pass@host/db}` produces full URL |
+| Env var literal dollar sign | Phase 11: Env var interpolation | Unit test: `$50` passes through unchanged |
+| PR workflow `pull_request_target` secret exposure | Phase 12: PR workflow | Code review: no `pull_request_target`, no `secrets.*` in PR workflow |
+| GitHub Actions check name mismatch | Phase 12: PR workflow | Create test PR after branch protection setup; verify gate check appears and completes |
+| PR workflow requiring secrets | Phase 12: PR workflow | Open PR from fork; verify all checks pass without secrets |
+| CONTRIBUTING.md wrong commands | Phase 13: Contributor docs | Follow doc verbatim on fresh `git clone`; verify every command succeeds |
+| CONTRIBUTING.md missing Playwright step | Phase 13: Contributor docs | Follow setup section; run browser tests; verify no missing step |
 
 ---
 
 ## Sources
 
 - JUnit XML format specification and conventions (Testmo): https://github.com/testmoapp/junitxml
-- JUnit XML `classname` required by ESLint reporter (GitHub issue): https://github.com/eslint/eslint/issues/11068
-- Tips on Adding JSON Output to Your CLI App (Kelly Brazil): https://blog.kellybrazil.com/2021/12/03/tips-on-adding-json-output-to-your-cli-app/
-- npm CLI bug: --json outputs errors to stdout instead of stderr: https://github.com/npm/cli/issues/2150
-- GitHub Actions required checks for conditional jobs: https://devopsdirective.com/posts/2025/08/github-actions-required-checks-for-conditional-jobs/
-- GitHub Docs: Troubleshooting required status checks: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks
-- GitHub community: Status checks "required if run" discussion: https://github.com/orgs/community/discussions/26092
-- GitHub community: Stuck in "Expected -- Waiting for status to be reported": https://github.com/orgs/community/discussions/26698
-- Biome migration guide for 2026: https://dev.to/pockit_tools/biome-the-eslint-and-prettier-killer-complete-migration-guide-for-2026-27m
-- Biome Git Hooks recipe: https://biomejs.dev/recipes/git-hooks/
-- Biome Roadmap 2026: https://biomejs.dev/blog/roadmap-2026/
-- YAML security risks (Kusari): https://www.kusari.dev/learning-center/yaml-security
-- Vector env var interpolation (newline rejection): https://vector.dev/docs/reference/environment_variables/
-- SuperGhost codebase analysis: `src/cli.ts`, `src/output/reporter.ts`, `src/output/types.ts`, `src/runner/types.ts`, `src/config/loader.ts`, `src/config/schema.ts`
+- JUnit XML format guide with attribute reference (Gaffer): https://gaffer.sh/blog/junit-xml-format-guide/
+- ANSI escape codes in JUnit CDATA causing invalid XML (bats-core issue #311): https://github.com/bats-core/bats-core/issues/311
+- ANSI escape codes invalid XML (mocha issue #4526): https://github.com/mochajs/mocha/issues/4526
+- OpenShift strip ANSI chars from JUnit XML (PR #27801): https://github.com/openshift/origin/pull/27801
+- Jenkins JUnit plugin: illegal XML characters not handled (issue #580): https://github.com/jenkinsci/junit-plugin/issues/580
+- JUnit XML time in ms vs seconds (GitLab issue #26247): https://gitlab.com/gitlab-org/gitlab/-/issues/26247
+- GitHub Actions pull_request_target security: preventing pwn requests (GitHub Security Lab): https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
+- GitHub Actions pull_request_target behavior change November 2025: https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/
+- GitHub Actions cache poisoning research: https://adnanthekhan.com/2024/05/06/the-monsters-in-your-build-cache-github-actions-cache-poisoning/
+- Masking env vars in GitHub Actions logs: https://akarshseggemu.medium.com/github-actions-best-practices-masking-secrets-and-managing-environment-variables-0099015b1f52
+- YAML security risks including env var interpolation injection (Kusari): https://www.kusari.dev/learning-center/yaml-security
+- Vector env var interpolation security (newline rejection): https://vector.dev/docs/reference/environment_variables/
+- GitHub Actions secure use reference: https://docs.github.com/en/actions/reference/security/secure-use
+- Open Source Guides: maintaining CONTRIBUTING.md: https://contributing.md/how-to-build-contributing-md/
+- SuperGhost codebase analysis: `src/cli.ts`, `src/output/reporter.ts`, `src/output/json-formatter.ts`, `src/runner/types.ts`, `src/config/loader.ts`, `src/config/schema.ts`, `src/cache/cache-manager.ts`, `src/cache/types.ts`, `.github/workflows/release.yml`, `.github/workflows/e2e.yml`
 
 ---
-*Pitfalls research for: SuperGhost v0.3 CI/CD + Team Readiness*
+*Pitfalls research for: SuperGhost v0.4 CI/CD + Team Readiness (JUnit XML, Env Var Interpolation, PR Workflow, Contributor Docs)*
 *Researched: 2026-03-12*
