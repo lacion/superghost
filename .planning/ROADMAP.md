@@ -79,7 +79,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Types, tool-name-map, and callback plumbing (agent-runner + test-executor)
+- [x] 07-01-PLAN.md — Types, tool-name-map, and callback plumbing (agent-runner + test-executor)
 - [ ] 07-02-PLAN.md — Reporter verbose/progress, CLI --verbose flag, stderr migration
 
 ## Progress
@@ -94,4 +94,4 @@ Plans:
 | 4. Foundation | v0.2 | 2/2 | Complete | - |
 | 5. Infrastructure + Flags | v0.2 | 0/2 | Not started | - |
 | 6. Dry-Run | v0.2 | 0/1 | Not started | - |
-| 7. Observability | v0.2 | 0/2 | Not started | - |
+| 7. Observability | v0.2 | 1/2 | In Progress | - |

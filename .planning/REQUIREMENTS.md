@@ -26,7 +26,7 @@ Requirements for v0.2 DX Polish + Reliability Hardening. Each maps to roadmap ph
 
 ### Observability
 
-- [ ] **OBS-01**: CLI shows real-time step progress during AI execution (tool call names mapped to human descriptions)
+- [x] **OBS-01**: CLI shows real-time step progress during AI execution (tool call names mapped to human descriptions)
 - [ ] **OBS-02**: All progress/spinner output routes to stderr (not stdout), with TTY detection gating ANSI output
 
 ## Future Requirements
@@ -81,7 +81,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLAG-03 | Phase 5 | Complete |
 | FLAG-01 | Phase 6 | Complete |
 | FLAG-02 | Phase 7 | Pending |
-| OBS-01 | Phase 7 | Pending |
+| OBS-01 | Phase 7 | Complete |
 | OBS-02 | Phase 7 | Pending |
 
 **Coverage:**
