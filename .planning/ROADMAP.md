@@ -63,10 +63,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Running `superghost --dry-run` lists all test names with their source (cache/AI) without executing any tests or launching a browser
   2. Dry-run still validates config (YAML parsing, Zod schema, API key presence) and exits 2 on config errors, so it never lies about whether a real run would succeed
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 06-01: TBD
+- [ ] 06-01-PLAN.md — TDD: --dry-run flag with test preview and config validation
 
 ### Phase 7: Observability
 **Goal**: Users get real-time feedback during AI execution and all progress output is CI-safe
@@ -93,5 +93,5 @@ Plans:
 | 3. Distribution | v1.0 | 2/2 | Complete | 2026-03-11 |
 | 4. Foundation | v0.2 | 2/2 | Complete | - |
 | 5. Infrastructure + Flags | v0.2 | 0/2 | Not started | - |
-| 6. Dry-Run | v0.2 | 0/? | Not started | - |
+| 6. Dry-Run | v0.2 | 0/1 | Not started | - |
 | 7. Observability | v0.2 | 0/? | Not started | - |
