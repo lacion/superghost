@@ -31,15 +31,6 @@ mock.module("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   StdioClientTransport: MockStdioClientTransport,
 }));
 
-mock.module("../../../src/dist/paths.ts", () => ({
-  getMcpCommand: (pkg: string) => {
-    if (pkg === "@playwright/mcp") {
-      return { command: "bunx", args: ["@playwright/mcp"] };
-    }
-    return { command: "bunx", args: ["@calibress/curl-mcp"] };
-  },
-}));
-
 // Import after mocks are set up
 import { McpManager } from "../../../src/agent/mcp-manager.ts";
 
