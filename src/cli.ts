@@ -99,7 +99,7 @@ program
       let mcpManager: McpManager | null = null;
 
       try {
-        const config = await loadConfig(options.config);
+        const { config, templates } = await loadConfig(options.config);
         if (options.headed) {
           config.headless = false;
         }
@@ -233,11 +233,12 @@ program
           globalContext: config.context,
           noCache: !options.cache,
           onStepProgress,
+          templates,
         });
 
         // Wire execute function for TestRunner
-        const executeFn: ExecuteFn = async (testCase, baseUrl, testContext?) =>
-          executor.execute(testCase, baseUrl, testContext);
+        const executeFn: ExecuteFn = async (testCase, baseUrl, testContext?, testIndex?) =>
+          executor.execute(testCase, baseUrl, testContext, testIndex);
 
         const runAnnotations: string[] = [];
         if (options.only) runAnnotations.push(`(filtered by --only "${options.only}")`);

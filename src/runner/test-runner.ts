@@ -3,7 +3,7 @@ import { type Reporter } from "../output/types.ts";
 import { type RunResult, type TestResult } from "./types.ts";
 
 /** Function signature for executing a single test case */
-export type ExecuteFn = (testCase: string, baseUrl: string, testContext?: string) => Promise<TestResult>;
+export type ExecuteFn = (testCase: string, baseUrl: string, testContext?: string, testIndex?: number) => Promise<TestResult>;
 
 /**
  * Orchestrates sequential execution of all test cases.
@@ -26,12 +26,13 @@ export class TestRunner {
     const startTime = Date.now();
     const results: TestResult[] = [];
 
-    for (const test of this.config.tests) {
+    for (let i = 0; i < this.config.tests.length; i++) {
+      const test = this.config.tests[i];
       const baseUrl = test.baseUrl ?? this.config.baseUrl ?? "";
 
       this.reporter.onTestStart(test.name);
 
-      const result = await this.executeFn(test.case, baseUrl, test.context);
+      const result = await this.executeFn(test.case, baseUrl, test.context, i);
       // Ensure testName uses the configured test.name (display name), not the raw testCase
       const displayResult = { ...result, testName: test.name };
       results.push(displayResult);

@@ -35,6 +35,7 @@ export class TestExecutor {
   private readonly globalContext?: string;
   private readonly noCache: boolean;
   private readonly onStepProgress?: OnStepProgress;
+  private readonly templates?: Map<string, string>;
 
   constructor(opts: {
     cacheManager: CacheManager;
@@ -46,6 +47,7 @@ export class TestExecutor {
     globalContext?: string;
     noCache?: boolean;
     onStepProgress?: OnStepProgress;
+    templates?: Map<string, string>;
   }) {
     this.cacheManager = opts.cacheManager;
     this.replayer = opts.replayer;
@@ -56,10 +58,11 @@ export class TestExecutor {
     this.globalContext = opts.globalContext;
     this.noCache = opts.noCache ?? false;
     this.onStepProgress = opts.onStepProgress;
+    this.templates = opts.templates;
   }
 
   /** Execute a single test case with cache-first strategy */
-  async execute(testCase: string, baseUrl: string, testContext?: string): Promise<TestResult> {
+  async execute(testCase: string, baseUrl: string, testContext?: string, testIndex?: number): Promise<TestResult> {
     const start = Date.now();
 
     // Phase 1: Try cache replay (unless noCache)
@@ -77,12 +80,12 @@ export class TestExecutor {
           };
         }
         // Cache stale — fall through to AI with self-heal flag
-        return this.executeWithAgent(testCase, baseUrl, start, true, testContext);
+        return this.executeWithAgent(testCase, baseUrl, start, true, testContext, testIndex);
       }
     }
 
     // Phase 2: No cache or noCache — go directly to AI
-    return this.executeWithAgent(testCase, baseUrl, start, false, testContext);
+    return this.executeWithAgent(testCase, baseUrl, start, false, testContext, testIndex);
   }
 
   /** Retry agent execution up to maxAttempts */
@@ -92,6 +95,7 @@ export class TestExecutor {
     startTime: number,
     selfHeal: boolean,
     testContext?: string,
+    testIndex?: number,
   ): Promise<TestResult> {
     let lastError = "";
 
@@ -109,13 +113,20 @@ export class TestExecutor {
 
       if (result.passed) {
         // Save cache for future replays
-        await this.cacheManager.save(testCase, baseUrl, result.steps, {
-          model: this.config.model,
-          provider: this.config.modelProvider,
-          stepCount: result.steps.length,
-          aiMessage: result.message,
-          durationMs: Date.now() - startTime,
-        });
+        await this.cacheManager.save(
+          testCase,
+          baseUrl,
+          result.steps,
+          {
+            model: this.config.model,
+            provider: this.config.modelProvider,
+            stepCount: result.steps.length,
+            aiMessage: result.message,
+            durationMs: Date.now() - startTime,
+          },
+          this.templates,
+          testIndex,
+        );
 
         return {
           testName: testCase,
