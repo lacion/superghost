@@ -124,4 +124,4 @@ Note: Phases 14 and 15 are technically independent but sequenced for implementat
 | 14. JUnit XML Output | 1/1 | Complete    | 2026-03-12 | - |
 | 15. Env Var Interpolation | 2/2 | Complete    | 2026-03-13 | - |
 | 16. GitHub Actions PR Workflow | 1/1 | Complete    | 2026-03-13 | - |
-| 17. Contributor Docs | 1/1 | Complete   | 2026-03-13 | - |
+| 17. Contributor Docs | 1/1 | Complete    | 2026-03-13 | - |
