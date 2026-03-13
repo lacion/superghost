@@ -1,6 +1,6 @@
 {
   "name": "superghost",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Plain English test cases with AI execution and instant cached replay for CI/CD",
   "type": "module",
   "bin": {

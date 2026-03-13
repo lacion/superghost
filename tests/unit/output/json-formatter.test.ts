@@ -49,17 +49,17 @@ describe("formatJsonOutput", () => {
   };
 
   test("returns valid JSON with correct top-level fields", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
-    expect(parsed.version).toBe("0.3.1");
+    expect(parsed.version).toBe("0.4.0");
     expect(parsed.success).toBe(false);
     expect(parsed.exitCode).toBe(1);
     expect(parsed.dryRun).toBeUndefined();
   });
 
   test("includes correct summary counts", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.summary.passed).toBe(2);
@@ -70,7 +70,7 @@ describe("formatJsonOutput", () => {
   });
 
   test("maps test results with correct fields", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.tests).toHaveLength(3);
@@ -84,7 +84,7 @@ describe("formatJsonOutput", () => {
   });
 
   test("selfHealed field only appears when true", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
     // First test: selfHealed not present (was undefined)
@@ -96,7 +96,7 @@ describe("formatJsonOutput", () => {
   });
 
   test("error field only appears when present", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
     expect("error" in parsed.tests[0]).toBe(false);
@@ -105,7 +105,7 @@ describe("formatJsonOutput", () => {
   });
 
   test("includes metadata with all fields", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.metadata.model).toBe("gpt-4o");
@@ -119,21 +119,21 @@ describe("formatJsonOutput", () => {
     const metadata = makeMetadata({
       filter: { pattern: "Login*", matched: 2, total: 4 },
     });
-    const json = formatJsonOutput(runResult, metadata, "0.3.1", 1);
+    const json = formatJsonOutput(runResult, metadata, "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.metadata.filter).toEqual({ pattern: "Login*", matched: 2, total: 4 });
   });
 
   test("filter metadata omitted when not provided", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.metadata.filter).toBeUndefined();
   });
 
   test("output is pretty-printed with 2-space indent", () => {
-    const json = formatJsonOutput(runResult, makeMetadata(), "0.3.1", 1);
+    const json = formatJsonOutput(runResult, makeMetadata(), "0.4.0", 1);
     // Should contain indented lines
     expect(json).toContain("  ");
     // Verify it's multi-line
@@ -148,17 +148,17 @@ describe("formatJsonDryRun", () => {
   ];
 
   test("returns valid JSON with dryRun: true", () => {
-    const json = formatJsonDryRun(tests, makeMetadata(), "0.3.1");
+    const json = formatJsonDryRun(tests, makeMetadata(), "0.4.0");
     const parsed: JsonOutput = JSON.parse(json);
 
-    expect(parsed.version).toBe("0.3.1");
+    expect(parsed.version).toBe("0.4.0");
     expect(parsed.dryRun).toBe(true);
     expect(parsed.success).toBe(true);
     expect(parsed.exitCode).toBe(0);
   });
 
   test("includes summary with total and cached counts", () => {
-    const json = formatJsonDryRun(tests, makeMetadata(), "0.3.1");
+    const json = formatJsonDryRun(tests, makeMetadata(), "0.4.0");
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.summary.total).toBe(2);
@@ -166,7 +166,7 @@ describe("formatJsonDryRun", () => {
   });
 
   test("maps test entries with testName, testCase, source", () => {
-    const json = formatJsonDryRun(tests, makeMetadata(), "0.3.1");
+    const json = formatJsonDryRun(tests, makeMetadata(), "0.4.0");
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.tests).toHaveLength(2);
@@ -177,7 +177,7 @@ describe("formatJsonDryRun", () => {
   });
 
   test("includes metadata", () => {
-    const json = formatJsonDryRun(tests, makeMetadata(), "0.3.1");
+    const json = formatJsonDryRun(tests, makeMetadata(), "0.4.0");
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.metadata.model).toBe("gpt-4o");
@@ -186,19 +186,19 @@ describe("formatJsonDryRun", () => {
 
 describe("formatJsonError", () => {
   test("returns valid JSON with error fields", () => {
-    const json = formatJsonError("baseUrl unreachable", "0.3.1", {
+    const json = formatJsonError("baseUrl unreachable", "0.4.0", {
       configFile: "test.yaml",
     });
     const parsed: JsonOutput = JSON.parse(json);
 
-    expect(parsed.version).toBe("0.3.1");
+    expect(parsed.version).toBe("0.4.0");
     expect(parsed.success).toBe(false);
     expect(parsed.exitCode).toBe(2);
     expect(parsed.error).toBe("baseUrl unreachable");
   });
 
   test("has empty tests array and zero summary counts", () => {
-    const json = formatJsonError("some error", "0.3.1", {});
+    const json = formatJsonError("some error", "0.4.0", {});
     const parsed: JsonOutput = JSON.parse(json);
 
     expect(parsed.tests).toEqual([]);
@@ -209,7 +209,7 @@ describe("formatJsonError", () => {
   });
 
   test("includes partial metadata", () => {
-    const json = formatJsonError("err", "0.3.1", {
+    const json = formatJsonError("err", "0.4.0", {
       configFile: "my-config.yaml",
       model: "gpt-4o",
     });
@@ -220,7 +220,7 @@ describe("formatJsonError", () => {
   });
 
   test("timestamp is in ISO 8601 format", () => {
-    const json = formatJsonError("err", "0.3.1", {});
+    const json = formatJsonError("err", "0.4.0", {});
     const parsed: JsonOutput = JSON.parse(json);
 
     // Should be a valid ISO date string
