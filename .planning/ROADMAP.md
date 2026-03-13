@@ -85,10 +85,10 @@ Plans:
   1. Opening a PR or pushing to main triggers a GitHub Actions workflow that runs lint, typecheck, and test jobs in parallel
   2. A single `gate` job aggregates all three check jobs, so branch protection requires only one status check name (not fragile per-job names)
   3. CI installs dependencies with `bun install --frozen-lockfile` so builds are reproducible and fail on lockfile drift
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 16-01: ci.yml workflow with parallel lint/typecheck/test jobs, gate aggregation, and frozen-lockfile
+- [ ] 16-01-PLAN.md — CI workflow with parallel lint/typecheck/test jobs, gate aggregation, and workflow alignment
 
 ### Phase 17: Contributor Docs
 **Goal**: A new contributor can find setup instructions, understand the PR process, report bugs, and know how to disclose security issues without asking anyone
