@@ -52,10 +52,10 @@ Requirements for v0.4 CI/CD + Team Readiness (Part 2). Each maps to roadmap phas
 
 ### Config
 
-- [ ] **CFG-01**: User can use `${VAR}` syntax in YAML config values to interpolate environment variables
-- [ ] **CFG-02**: User can use `${VAR:-default}` syntax to provide fallback values for unset env vars
-- [ ] **CFG-03**: User can use `${VAR:?error message}` syntax to require env vars with descriptive error on missing
-- [ ] **CFG-04**: Env var interpolation runs post-YAML-parse (on JS object) so YAML-special characters in values don't break parsing
+- [x] **CFG-01**: User can use `${VAR}` syntax in YAML config values to interpolate environment variables
+- [x] **CFG-02**: User can use `${VAR:-default}` syntax to provide fallback values for unset env vars
+- [x] **CFG-03**: User can use `${VAR:?error message}` syntax to require env vars with descriptive error on missing
+- [x] **CFG-04**: Env var interpolation runs post-YAML-parse (on JS object) so YAML-special characters in values don't break parsing
 
 ### CI/CD
 
@@ -129,10 +129,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OUT-04 | Phase 9 (v0.3) | Complete |
 | OUT-02 | Phase 14 (v0.4) | Complete |
 | OUT-05 | Phase 14 (v0.4) | Complete |
-| CFG-01 | Phase 15 (v0.4) | Pending |
-| CFG-02 | Phase 15 (v0.4) | Pending |
-| CFG-03 | Phase 15 (v0.4) | Pending |
-| CFG-04 | Phase 15 (v0.4) | Pending |
+| CFG-01 | Phase 15 (v0.4) | Complete |
+| CFG-02 | Phase 15 (v0.4) | Complete |
+| CFG-03 | Phase 15 (v0.4) | Complete |
+| CFG-04 | Phase 15 (v0.4) | Complete |
 | CI-01 | Phase 16 (v0.4) | Pending |
 | CI-02 | Phase 16 (v0.4) | Pending |
 | CI-03 | Phase 16 (v0.4) | Pending |
