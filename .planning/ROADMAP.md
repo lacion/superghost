@@ -41,7 +41,7 @@
 **Milestone Goal:** Complete team-readiness features — JUnit XML for CI reporting, env var interpolation for CI-safe configs, PR workflow gates, and contributor onboarding docs.
 
 - [x] **Phase 14: JUnit XML Output** — CI-standard JUnit XML results via `--output junit` for test reporting dashboards (completed 2026-03-12)
-- [ ] **Phase 15: Env Var Interpolation** — `${VAR}` syntax in YAML configs for CI-safe secret injection
+- [x] **Phase 15: Env Var Interpolation** — `${VAR}` syntax in YAML configs for CI-safe secret injection (completed 2026-03-13)
 - [ ] **Phase 16: GitHub Actions PR Workflow** — Lint, typecheck, and test gates on every PR
 - [ ] **Phase 17: Contributor Docs** — CONTRIBUTING.md, SECURITY.md, issue/PR templates for team onboarding
 
@@ -122,6 +122,6 @@ Note: Phases 14 and 15 are technically independent but sequenced for implementat
 | 8. Biome Setup | v0.3 | 1/1 | Complete | 2026-03-12 |
 | 9. JSON Output | v0.3 | 1/1 | Complete | 2026-03-12 |
 | 14. JUnit XML Output | 1/1 | Complete    | 2026-03-12 | - |
-| 15. Env Var Interpolation | 1/2 | In Progress|  | - |
+| 15. Env Var Interpolation | 2/2 | Complete   | 2026-03-13 | - |
 | 16. GitHub Actions PR Workflow | v0.4 | 0/1 | Not started | - |
 | 17. Contributor Docs | v0.4 | 0/1 | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: CI/CD + Team Readiness (Part 2)
 status: in-progress
-stopped_at: "Completed 15-01-PLAN.md"
-last_updated: "2026-03-13T13:54:00Z"
-last_activity: 2026-03-13 — Phase 15 Plan 01 complete (Env Var Interpolation Engine)
+stopped_at: "Completed 15-02-PLAN.md"
+last_updated: "2026-03-13T14:00:00Z"
+last_activity: 2026-03-13 — Phase 15 complete (Env Var Interpolation)
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 3
-  completed_plans: 2
-  percent: 92
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 15 of 17 (Env Var Interpolation)
-Plan: 1 of 2 in current phase (complete)
-Status: Plan 15-01 complete, Plan 15-02 pending
-Last activity: 2026-03-13 — Phase 15 Plan 01 complete (Env Var Interpolation Engine)
+Plan: 2 of 2 in current phase (complete)
+Status: Phase 15 complete
+Last activity: 2026-03-13 — Phase 15 Plan 02 complete (Integration Wiring)
 
-Progress: [█████████░] 92%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -41,6 +41,7 @@ Progress: [█████████░] 92%
 |-------|------|----------|-------|-------|
 | 14    | 01   | 4min     | 2     | 5     |
 | 15    | 01   | 2min     | 2     | 2     |
+| 15    | 02   | 4min     | 2     | 9     |
 
 *Updated after each plan completion*
 
@@ -54,6 +55,9 @@ Phase 15:
 - (15-01) Single regex with escape-first alternation handles all syntax variants
 - (15-01) Empty string env values treated as unset per POSIX convention
 - (15-01) Template map uses Map<string, string> with dot-bracket path notation
+- (15-02) loadConfig returns { config, templates } -- single caller pattern made change safe
+- (15-02) CacheManager backward compat via optional template params
+- (15-02) Template path lookup uses testIndex for per-test field matching
 
 Phase 14:
 - (14-01) Template literal XML generation — zero dependencies, matches project pattern
@@ -78,10 +82,10 @@ Carried forward:
 - OpenRouter model namespace format (`anthropic/claude-3-5-sonnet`) needs integration test
 - Gemini tool call response shape differences need dedicated integration test
 - `bun build --compile` dynamic import limitation — MCP server packages must NOT be bundled into binary
-- Secret leakage in cache metadata when env vars resolve API keys (design during Phase 15)
+- Secret leakage in cache metadata when env vars resolve API keys (RESOLVED: Phase 15 stores template forms)
 
 ## Session Continuity
 
-Last session: 2026-03-13T13:54:00Z
-Stopped at: Completed 15-01-PLAN.md
-Resume file: .planning/phases/15-env-var-interpolation/15-01-SUMMARY.md
+Last session: 2026-03-13T14:00:00Z
+Stopped at: Completed 15-02-PLAN.md
+Resume file: .planning/phases/15-env-var-interpolation/15-02-SUMMARY.md
