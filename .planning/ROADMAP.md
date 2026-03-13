@@ -99,10 +99,10 @@ Plans:
   2. SECURITY.md provides a real security contact email and an acknowledgment commitment timeline
   3. GitHub issue templates for bug reports and feature requests use YAML form format and appear in the "New Issue" chooser
   4. A PR template with a checklist for tests, lint, and description auto-populates when opening a new pull request
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 17-01: CONTRIBUTING.md, SECURITY.md, issue templates, and PR template
+- [ ] 17-01-PLAN.md — CONTRIBUTING.md, SECURITY.md, issue templates, and PR template
 
 ## Progress
 
