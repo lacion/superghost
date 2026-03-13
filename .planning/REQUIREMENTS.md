@@ -59,9 +59,9 @@ Requirements for v0.4 CI/CD + Team Readiness (Part 2). Each maps to roadmap phas
 
 ### CI/CD
 
-- [ ] **CI-01**: GitHub Actions `ci.yml` runs lint, typecheck, and test jobs in parallel on PRs and pushes to main
-- [ ] **CI-02**: A single `gate` job aggregates all CI checks for branch protection (avoids check name fragility)
-- [ ] **CI-03**: CI uses `bun install --frozen-lockfile` for reproducible installs
+- [x] **CI-01**: GitHub Actions `ci.yml` runs lint, typecheck, and test jobs in parallel on PRs and pushes to main
+- [x] **CI-02**: A single `gate` job aggregates all CI checks for branch protection (avoids check name fragility)
+- [x] **CI-03**: CI uses `bun install --frozen-lockfile` for reproducible installs
 
 ### Contributor Readiness
 
@@ -133,9 +133,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CFG-02 | Phase 15 (v0.4) | Complete |
 | CFG-03 | Phase 15 (v0.4) | Complete |
 | CFG-04 | Phase 15 (v0.4) | Complete |
-| CI-01 | Phase 16 (v0.4) | Pending |
-| CI-02 | Phase 16 (v0.4) | Pending |
-| CI-03 | Phase 16 (v0.4) | Pending |
+| CI-01 | Phase 16 (v0.4) | Complete |
+| CI-02 | Phase 16 (v0.4) | Complete |
+| CI-03 | Phase 16 (v0.4) | Complete |
 | CONTRIB-01 | Phase 17 (v0.4) | Pending |
 | CONTRIB-02 | Phase 17 (v0.4) | Pending |
 | CONTRIB-03 | Phase 17 (v0.4) | Pending |

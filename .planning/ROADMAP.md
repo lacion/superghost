@@ -42,7 +42,7 @@
 
 - [x] **Phase 14: JUnit XML Output** — CI-standard JUnit XML results via `--output junit` for test reporting dashboards (completed 2026-03-12)
 - [x] **Phase 15: Env Var Interpolation** — `${VAR}` syntax in YAML configs for CI-safe secret injection (completed 2026-03-13)
-- [ ] **Phase 16: GitHub Actions PR Workflow** — Lint, typecheck, and test gates on every PR
+- [x] **Phase 16: GitHub Actions PR Workflow** — Lint, typecheck, and test gates on every PR (completed 2026-03-13)
 - [ ] **Phase 17: Contributor Docs** — CONTRIBUTING.md, SECURITY.md, issue/PR templates for team onboarding
 
 ## Phase Details
@@ -123,5 +123,5 @@ Note: Phases 14 and 15 are technically independent but sequenced for implementat
 | 9. JSON Output | v0.3 | 1/1 | Complete | 2026-03-12 |
 | 14. JUnit XML Output | 1/1 | Complete    | 2026-03-12 | - |
 | 15. Env Var Interpolation | 2/2 | Complete    | 2026-03-13 | - |
-| 16. GitHub Actions PR Workflow | v0.4 | 0/1 | Not started | - |
+| 16. GitHub Actions PR Workflow | 1/1 | Complete   | 2026-03-13 | - |
 | 17. Contributor Docs | v0.4 | 0/1 | Not started | - |

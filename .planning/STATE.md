@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: CI/CD + Team Readiness (Part 2)
 status: completed
-stopped_at: Phase 16 context gathered
-last_updated: "2026-03-13T15:39:00.678Z"
-last_activity: 2026-03-13 — Phase 15 Plan 02 complete (Integration Wiring)
+stopped_at: Completed 16-01-PLAN.md
+last_updated: "2026-03-13T16:00:52.000Z"
+last_activity: 2026-03-13 — Phase 16 Plan 01 complete (CI Workflow)
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 3
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
-**Current focus:** Phase 15 — Env Var Interpolation
+**Current focus:** Phase 16 — GitHub Actions PR Workflow
 
 ## Current Position
 
-Phase: 15 of 17 (Env Var Interpolation)
-Plan: 2 of 2 in current phase (complete)
-Status: Phase 15 complete
+Phase: 16 of 17 (GitHub Actions PR Workflow)
+Plan: 1 of 1 in current phase (complete)
+Status: Phase 16 complete
 Last activity: 2026-03-13 — Phase 15 Plan 02 complete (Integration Wiring)
 
 Progress: [██████████] 100%
@@ -42,6 +42,7 @@ Progress: [██████████] 100%
 | 14    | 01   | 4min     | 2     | 5     |
 | 15    | 01   | 2min     | 2     | 2     |
 | 15    | 02   | 4min     | 2     | 9     |
+| 16    | 01   | 2min     | 2     | 3     |
 
 *Updated after each plan completion*
 
@@ -50,6 +51,11 @@ Progress: [██████████] 100%
 ### Decisions
 
 Full decision log in PROJECT.md Key Decisions table.
+
+Phase 16:
+- (16-01) Gate job uses strict == success comparison so cancelled/skipped jobs also fail gate
+- (16-01) No explicit name on gate job -- appears as "CI / gate" in branch protection
+- (16-01) Draft PR filtering via !github.event.pull_request.draft (null -> false for push events)
 
 Phase 15:
 - (15-01) Single regex with escape-first alternation handles all syntax variants
@@ -86,6 +92,6 @@ Carried forward:
 
 ## Session Continuity
 
-Last session: 2026-03-13T15:39:00.675Z
-Stopped at: Phase 16 context gathered
-Resume file: .planning/phases/16-github-actions-pr-workflow/16-CONTEXT.md
+Last session: 2026-03-13T16:00:51.999Z
+Stopped at: Completed 16-01-PLAN.md
+Resume file: None
