@@ -404,7 +404,7 @@ describe("CLI Pipeline Integration", () => {
       const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/env-var-config.yaml", "--dry-run"], {
         BASE_URL: "",
         API_URL: "https://api.test.com",
-        OPENAI_API_KEY: "fake-key",
+        ANTHROPIC_API_KEY: "fake-key",
       });
       // BASE_URL is empty so ${BASE_URL:-http://localhost:3000} should use default
       expect(exitCode).toBe(0);

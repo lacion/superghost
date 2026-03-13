@@ -32,7 +32,7 @@ export function getMcpCommand(
   packageName: string,
   standalone?: boolean,
 ): { command: string; args: string[] } {
-  const isStandalone = standalone ?? isStandaloneBinary();
+  const isStandalone = standalone !== undefined ? standalone : isStandaloneBinary();
 
   if (isStandalone) {
     const binPath = join(MCP_NODE_MODULES, ".bin");

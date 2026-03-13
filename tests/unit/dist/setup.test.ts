@@ -1,6 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { SUPERGHOST_HOME, MCP_NODE_MODULES } from "../../../src/dist/paths.ts";
+import { ensureMcpDependencies } from "../../../src/dist/setup.ts";
 
 // We test ensureMcpDependencies by mocking Bun globals and process.exit
 describe("setup", () => {
@@ -24,16 +25,13 @@ describe("setup", () => {
         return origFile(path);
       });
 
-      // Fresh import to get unmemoized module
-      const { ensureMcpDependencies } = await import(
-        "../../../src/dist/setup.ts"
-      );
-      await ensureMcpDependencies();
-
-      expect(mockExists).toHaveBeenCalled();
-      // Restore
-      // @ts-ignore
-      Bun.file = origFile;
+      try {
+        await ensureMcpDependencies();
+        expect(mockExists).toHaveBeenCalled();
+      } finally {
+        // @ts-ignore
+        Bun.file = origFile;
+      }
     });
 
     test("installs dependencies when marker missing", async () => {
@@ -61,28 +59,24 @@ describe("setup", () => {
       // @ts-ignore
       Bun.spawn = mockSpawn;
 
-      // Fresh import
-      delete require.cache[require.resolve("../../../src/dist/setup.ts")];
-      const { ensureMcpDependencies } = await import(
-        "../../../src/dist/setup.ts"
-      );
-      await ensureMcpDependencies();
+      try {
+        await ensureMcpDependencies();
 
-      // Verify package.json was written
-      expect(mockWrite).toHaveBeenCalled();
-      const writeCall = (mockWrite.mock.calls as unknown[][])[0];
-      expect(writeCall[0]).toBe(join(SUPERGHOST_HOME, "package.json"));
+        // Verify package.json was written
+        expect(mockWrite).toHaveBeenCalled();
+        const writeCall = (mockWrite.mock.calls as unknown[][])[0];
+        expect(writeCall[0]).toBe(join(SUPERGHOST_HOME, "package.json"));
 
-      // Verify spawn was called for install
-      expect(mockSpawn).toHaveBeenCalled();
-
-      // Restore
-      // @ts-ignore
-      Bun.file = origFile;
-      // @ts-ignore
-      Bun.write = origWrite;
-      // @ts-ignore
-      Bun.spawn = origSpawn;
+        // Verify spawn was called for install
+        expect(mockSpawn).toHaveBeenCalled();
+      } finally {
+        // @ts-ignore
+        Bun.file = origFile;
+        // @ts-ignore
+        Bun.write = origWrite;
+        // @ts-ignore
+        Bun.spawn = origSpawn;
+      }
     });
 
     test("exits with code 1 when install fails", async () => {
@@ -116,23 +110,19 @@ describe("setup", () => {
       // @ts-ignore
       process.exit = mockExit;
 
-      delete require.cache[require.resolve("../../../src/dist/setup.ts")];
-      const { ensureMcpDependencies } = await import(
-        "../../../src/dist/setup.ts"
-      );
-
-      await expect(ensureMcpDependencies()).rejects.toThrow("process.exit(1)");
-      expect(mockExit).toHaveBeenCalledWith(1);
-
-      // Restore
-      // @ts-ignore
-      Bun.file = origFile;
-      // @ts-ignore
-      Bun.write = origWrite;
-      // @ts-ignore
-      Bun.spawn = origSpawn;
-      // @ts-ignore
-      process.exit = origExit;
+      try {
+        await expect(ensureMcpDependencies()).rejects.toThrow("process.exit(1)");
+        expect(mockExit).toHaveBeenCalledWith(1);
+      } finally {
+        // @ts-ignore
+        Bun.file = origFile;
+        // @ts-ignore
+        Bun.write = origWrite;
+        // @ts-ignore
+        Bun.spawn = origSpawn;
+        // @ts-ignore
+        process.exit = origExit;
+      }
     });
   });
 });
