@@ -1,0 +1,5 @@
+baseUrl: ${BASE_URL:-http://localhost:3000}
+tests:
+  - name: Login Test
+    case: check login works
+    baseUrl: ${API_URL}

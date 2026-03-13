@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
 import { ConfigLoadError, loadConfig } from "../../../src/config/loader.ts";
@@ -77,6 +77,66 @@ describe("loadConfig", () => {
       expect(error).toBeInstanceOf(ConfigLoadError);
       const err = error as ConfigLoadError;
       expect(err.message).toContain("Invalid config");
+    }
+  });
+});
+
+describe("loadConfig env var interpolation", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv.BASE_URL = process.env.BASE_URL;
+    savedEnv.API_URL = process.env.API_URL;
+  });
+
+  afterEach(() => {
+    // Restore original env
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  test("returns { config, templates } with env vars resolved", async () => {
+    process.env.BASE_URL = "https://prod.example.com";
+    process.env.API_URL = "https://api.example.com";
+
+    const result = await loadConfig(join(fixturesDir, "env-var-config.yaml"));
+
+    // Result should be an object with config and templates
+    expect(result).toHaveProperty("config");
+    expect(result).toHaveProperty("templates");
+    expect(result.config.baseUrl).toBe("https://prod.example.com");
+    expect(result.config.tests[0].baseUrl).toBe("https://api.example.com");
+    expect(result.templates).toBeInstanceOf(Map);
+    expect(result.templates.size).toBeGreaterThan(0);
+  });
+
+  test("uses default values when env var not set", async () => {
+    delete process.env.BASE_URL;
+    process.env.API_URL = "https://api.example.com";
+
+    const result = await loadConfig(join(fixturesDir, "env-var-config.yaml"));
+
+    expect(result.config.baseUrl).toBe("http://localhost:3000");
+  });
+
+  test("throws ConfigLoadError with numbered list for missing required env vars", async () => {
+    delete process.env.BASE_URL;
+    delete process.env.API_URL;
+
+    try {
+      await loadConfig(join(fixturesDir, "env-var-config.yaml"));
+      expect(true).toBe(false); // should not reach here
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigLoadError);
+      const err = error as ConfigLoadError;
+      expect(err.message).toContain("Missing env var");
+      expect(err.message).toMatch(/\d+\./); // numbered list
+      expect(err.message).toContain("API_URL");
     }
   });
 });

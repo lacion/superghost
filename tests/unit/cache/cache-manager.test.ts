@@ -221,6 +221,55 @@ describe("CacheManager", () => {
     });
   });
 
+  describe("hashKey with templates", () => {
+    test("with template params produces different hash than without", () => {
+      const hashWithout = CacheManager.hashKey(testCase, baseUrl);
+      const hashWith = CacheManager.hashKey(testCase, baseUrl, "${TEST_CASE}", "${BASE_URL}");
+      expect(hashWith).not.toBe(hashWithout);
+    });
+
+    test("same template but different resolved produces different hash", () => {
+      const hash1 = CacheManager.hashKey("value-a", baseUrl, "${VAR}", "${BASE_URL}");
+      const hash2 = CacheManager.hashKey("value-b", baseUrl, "${VAR}", "${BASE_URL}");
+      expect(hash1).not.toBe(hash2);
+    });
+
+    test("same resolved but different template produces different hash", () => {
+      const hash1 = CacheManager.hashKey(testCase, baseUrl, "${VAR_A}", "${BASE_URL}");
+      const hash2 = CacheManager.hashKey(testCase, baseUrl, "${VAR_B}", "${BASE_URL}");
+      expect(hash1).not.toBe(hash2);
+    });
+  });
+
+  describe("save with templates", () => {
+    test("stores template form for interpolated fields", async () => {
+      const templates = new Map<string, string>();
+      templates.set("baseUrl", "${BASE_URL}");
+      templates.set("tests[0].case", "${TEST_CASE}");
+
+      await manager.save(testCase, baseUrl, steps, diagnostics, templates, 0);
+
+      // Read the saved file - it should contain template form for baseUrl
+      const hash = CacheManager.hashKey(testCase, baseUrl, templates.get("tests[0].case"), templates.get("baseUrl"));
+      const filePath = join(cacheDir, `${hash}.json`);
+      const content = JSON.parse(await Bun.file(filePath).text());
+
+      expect(content.baseUrl).toBe("${BASE_URL}");
+      expect(content.testCase).toBe("${TEST_CASE}");
+    });
+
+    test("without templates behaves identically to current", async () => {
+      await manager.save(testCase, baseUrl, steps, diagnostics);
+
+      const hash = CacheManager.hashKey(testCase, baseUrl);
+      const filePath = join(cacheDir, `${hash}.json`);
+      const content = JSON.parse(await Bun.file(filePath).text());
+
+      expect(content.testCase).toBe(testCase);
+      expect(content.baseUrl).toBe(baseUrl);
+    });
+  });
+
   describe("migrateV1Cache", () => {
     test("deletes files with version 1 and preserves files with version 2", async () => {
       // Create a v1 cache file
