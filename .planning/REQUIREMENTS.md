@@ -65,10 +65,10 @@ Requirements for v0.4 CI/CD + Team Readiness (Part 2). Each maps to roadmap phas
 
 ### Contributor Readiness
 
-- [ ] **CONTRIB-01**: CONTRIBUTING.md documents dev setup, linting, testing, and PR process using bun/bunx commands
-- [ ] **CONTRIB-02**: SECURITY.md provides a real security contact and acknowledgment commitment
-- [ ] **CONTRIB-03**: GitHub issue templates (bug report, feature request) use YAML form format
-- [ ] **CONTRIB-04**: PR template includes checklist for tests, lint, and description
+- [x] **CONTRIB-01**: CONTRIBUTING.md documents dev setup, linting, testing, and PR process using bun/bunx commands
+- [x] **CONTRIB-02**: SECURITY.md provides a real security contact and acknowledgment commitment
+- [x] **CONTRIB-03**: GitHub issue templates (bug report, feature request) use YAML form format
+- [x] **CONTRIB-04**: PR template includes checklist for tests, lint, and description
 
 ## Future Requirements
 
@@ -136,10 +136,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CI-01 | Phase 16 (v0.4) | Complete |
 | CI-02 | Phase 16 (v0.4) | Complete |
 | CI-03 | Phase 16 (v0.4) | Complete |
-| CONTRIB-01 | Phase 17 (v0.4) | Pending |
-| CONTRIB-02 | Phase 17 (v0.4) | Pending |
-| CONTRIB-03 | Phase 17 (v0.4) | Pending |
-| CONTRIB-04 | Phase 17 (v0.4) | Pending |
+| CONTRIB-01 | Phase 17 (v0.4) | Complete |
+| CONTRIB-02 | Phase 17 (v0.4) | Complete |
+| CONTRIB-03 | Phase 17 (v0.4) | Complete |
+| CONTRIB-04 | Phase 17 (v0.4) | Complete |
 
 **Coverage:**
 - v0.2 requirements: 10 total, 10 complete

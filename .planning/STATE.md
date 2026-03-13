@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: CI/CD + Team Readiness (Part 2)
 status: completed
-stopped_at: Phase 17 context gathered
-last_updated: "2026-03-13T16:43:37.268Z"
-last_activity: 2026-03-13 — Phase 15 Plan 02 complete (Integration Wiring)
+stopped_at: Phase 17 Plan 01 complete
+last_updated: "2026-03-13T16:57:34.437Z"
+last_activity: 2026-03-13 — Phase 17 Plan 01 complete (Contributor Docs)
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 4
-  completed_plans: 4
+  completed_phases: 4
+  total_plans: 5
+  completed_plans: 5
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Plain English test cases that execute in a real browser, with step caching that makes them fast and deterministic enough for CI/CD — no test code required.
-**Current focus:** Phase 16 — GitHub Actions PR Workflow
+**Current focus:** Phase 17 — Contributor Docs (complete)
 
 ## Current Position
 
-Phase: 16 of 17 (GitHub Actions PR Workflow)
+Phase: 17 of 17 (Contributor Docs)
 Plan: 1 of 1 in current phase (complete)
-Status: Phase 16 complete
-Last activity: 2026-03-13 — Phase 15 Plan 02 complete (Integration Wiring)
+Status: Phase 17 complete -- v0.4 milestone complete
+Last activity: 2026-03-13 — Phase 17 Plan 01 complete (Contributor Docs)
 
 Progress: [██████████] 100%
 
@@ -43,6 +43,7 @@ Progress: [██████████] 100%
 | 15    | 01   | 2min     | 2     | 2     |
 | 15    | 02   | 4min     | 2     | 9     |
 | 16    | 01   | 2min     | 2     | 3     |
+| 17    | 01   | 2min     | 2     | 6     |
 
 *Updated after each plan completion*
 
@@ -51,6 +52,12 @@ Progress: [██████████] 100%
 ### Decisions
 
 Full decision log in PROJECT.md Key Decisions table.
+
+Phase 17:
+- (17-01) GitHub Security Advisory as sole reporting channel (no email)
+- (17-01) Best-effort response timeline (honest for solo-maintainer)
+- (17-01) Blank issues enabled in issue chooser for edge cases
+- (17-01) PR checklist limited to 3 items matching CI checks
 
 Phase 16:
 - (16-01) Gate job uses strict == success comparison so cancelled/skipped jobs also fail gate
@@ -92,6 +99,6 @@ Carried forward:
 
 ## Session Continuity
 
-Last session: 2026-03-13T16:43:37.265Z
-Stopped at: Phase 17 context gathered
-Resume file: .planning/phases/17-contributor-docs/17-CONTEXT.md
+Last session: 2026-03-13T16:57:00Z
+Stopped at: Completed 17-01-PLAN.md
+Resume file: .planning/phases/17-contributor-docs/17-01-SUMMARY.md
