@@ -36,7 +36,7 @@
 
 </details>
 
-### 🚧 v0.4 CI/CD + Team Readiness (Part 2)
+### v0.4 CI/CD + Team Readiness (Part 2)
 
 **Milestone Goal:** Complete team-readiness features — JUnit XML for CI reporting, env var interpolation for CI-safe configs, PR workflow gates, and contributor onboarding docs.
 
@@ -71,10 +71,11 @@ Plans:
   3. A YAML config containing `apiKey: ${API_KEY:?API_KEY must be set}` exits with code 2 and the descriptive error message when `API_KEY` is not set
   4. Env var values containing YAML-special characters (`:`, `#`, `{`, `[`) do not break config parsing because interpolation runs on the parsed JS object, not the raw YAML string
   5. Resolved env var values do not leak into `.superghost-cache/` metadata — only the template form (`${VAR}`) persists in cache files
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 15-01: Post-parse interpolation engine with ${VAR}, ${VAR:-default}, ${VAR:?error} syntax, secret leakage prevention, and unit tests
+- [ ] 15-01-PLAN.md — TDD: Core interpolation engine (interpolateConfig with ${VAR}, ${VAR:-default}, ${VAR:?error}, deep walk, template map)
+- [ ] 15-02-PLAN.md — Integration: Wire into loadConfig, CacheManager template awareness, CLI/TestExecutor threading
 
 ### Phase 16: GitHub Actions PR Workflow
 **Goal**: Every pull request and push to main is automatically checked for lint violations, type errors, and test failures before merge
@@ -121,6 +122,6 @@ Note: Phases 14 and 15 are technically independent but sequenced for implementat
 | 8. Biome Setup | v0.3 | 1/1 | Complete | 2026-03-12 |
 | 9. JSON Output | v0.3 | 1/1 | Complete | 2026-03-12 |
 | 14. JUnit XML Output | 1/1 | Complete    | 2026-03-12 | - |
-| 15. Env Var Interpolation | v0.4 | 0/1 | Not started | - |
+| 15. Env Var Interpolation | v0.4 | 0/2 | Not started | - |
 | 16. GitHub Actions PR Workflow | v0.4 | 0/1 | Not started | - |
 | 17. Contributor Docs | v0.4 | 0/1 | Not started | - |
