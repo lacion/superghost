@@ -1,26 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  interpolateConfig,
-  type InterpolationResult,
-} from "../../../src/config/interpolate.ts";
+import { type InterpolationResult, interpolateConfig } from "../../../src/config/interpolate.ts";
 
 describe("interpolateConfig", () => {
   describe("CFG-01: simple ${VAR} resolution", () => {
     test("resolves ${VAR} to env value", () => {
-      const result = interpolateConfig(
-        { baseUrl: "${BASE_URL}" },
-        { BASE_URL: "http://localhost:3000" },
-      );
+      const result = interpolateConfig({ baseUrl: "${BASE_URL}" }, { BASE_URL: "http://localhost:3000" });
       expect(result.resolved).toEqual({ baseUrl: "http://localhost:3000" });
       expect(result.errors).toHaveLength(0);
     });
 
     test("resolves multiple different vars", () => {
-      const result = interpolateConfig(
-        { host: "${HOST}", port: "${PORT}" },
-        { HOST: "localhost", PORT: "3000" },
-      );
+      const result = interpolateConfig({ host: "${HOST}", port: "${PORT}" }, { HOST: "localhost", PORT: "3000" });
       expect(result.resolved).toEqual({ host: "localhost", port: "3000" });
       expect(result.errors).toHaveLength(0);
     });
@@ -28,10 +19,7 @@ describe("interpolateConfig", () => {
 
   describe("CFG-02: ${VAR:-default} fallback", () => {
     test("uses default when var is unset", () => {
-      const result = interpolateConfig(
-        { baseUrl: "${BASE_URL:-http://localhost:3000}" },
-        {},
-      );
+      const result = interpolateConfig({ baseUrl: "${BASE_URL:-http://localhost:3000}" }, {});
       expect(result.resolved).toEqual({
         baseUrl: "http://localhost:3000",
       });
@@ -49,10 +37,7 @@ describe("interpolateConfig", () => {
     });
 
     test("uses default when var is empty string", () => {
-      const result = interpolateConfig(
-        { baseUrl: "${BASE_URL:-http://localhost:3000}" },
-        { BASE_URL: "" },
-      );
+      const result = interpolateConfig({ baseUrl: "${BASE_URL:-http://localhost:3000}" }, { BASE_URL: "" });
       expect(result.resolved).toEqual({
         baseUrl: "http://localhost:3000",
       });
@@ -62,27 +47,18 @@ describe("interpolateConfig", () => {
 
   describe("CFG-03: ${VAR:?error} required with error", () => {
     test("produces error when var is unset", () => {
-      const result = interpolateConfig(
-        { apiKey: "${API_KEY:?API_KEY must be set}" },
-        {},
-      );
+      const result = interpolateConfig({ apiKey: "${API_KEY:?API_KEY must be set}" }, {});
       expect(result.errors).toContain("API_KEY: API_KEY must be set");
     });
 
     test("resolves normally when var is set", () => {
-      const result = interpolateConfig(
-        { apiKey: "${API_KEY:?API_KEY must be set}" },
-        { API_KEY: "secret123" },
-      );
+      const result = interpolateConfig({ apiKey: "${API_KEY:?API_KEY must be set}" }, { API_KEY: "secret123" });
       expect(result.resolved).toEqual({ apiKey: "secret123" });
       expect(result.errors).toHaveLength(0);
     });
 
     test("produces error when var is empty string", () => {
-      const result = interpolateConfig(
-        { apiKey: "${API_KEY:?API_KEY must be set}" },
-        { API_KEY: "" },
-      );
+      const result = interpolateConfig({ apiKey: "${API_KEY:?API_KEY must be set}" }, { API_KEY: "" });
       expect(result.errors).toContain("API_KEY: API_KEY must be set");
     });
 
@@ -102,10 +78,7 @@ describe("interpolateConfig", () => {
 
   describe("CFG-04: deep walk of nested objects and arrays", () => {
     test("walks nested objects", () => {
-      const result = interpolateConfig(
-        { tests: [{ baseUrl: "${URL}" }] },
-        { URL: "http://example.com" },
-      );
+      const result = interpolateConfig({ tests: [{ baseUrl: "${URL}" }] }, { URL: "http://example.com" });
       const resolved = result.resolved as { tests: { baseUrl: string }[] };
       expect(resolved.tests[0].baseUrl).toBe("http://example.com");
     });
@@ -119,10 +92,7 @@ describe("interpolateConfig", () => {
     });
 
     test("passes through non-string values unchanged", () => {
-      const result = interpolateConfig(
-        { port: 3000, headless: true, empty: null },
-        {},
-      );
+      const result = interpolateConfig({ port: 3000, headless: true, empty: null }, {});
       expect(result.resolved).toEqual({
         port: 3000,
         headless: true,
@@ -132,10 +102,7 @@ describe("interpolateConfig", () => {
     });
 
     test("template map uses dot-bracket path notation", () => {
-      const result = interpolateConfig(
-        { tests: [{ baseUrl: "${URL}" }] },
-        { URL: "http://example.com" },
-      );
+      const result = interpolateConfig({ tests: [{ baseUrl: "${URL}" }] }, { URL: "http://example.com" });
       expect(result.templates.get("tests[0].baseUrl")).toBe("${URL}");
     });
 
@@ -173,10 +140,7 @@ describe("interpolateConfig", () => {
 
   describe("escape hatch: $${VAR}", () => {
     test("$${VAR} produces literal ${VAR}", () => {
-      const result = interpolateConfig(
-        { key: "$${VAR}" },
-        { VAR: "value" },
-      );
+      const result = interpolateConfig({ key: "$${VAR}" }, { VAR: "value" });
       expect((result.resolved as { key: string }).key).toBe("${VAR}");
       expect(result.errors).toHaveLength(0);
     });
@@ -203,23 +167,13 @@ describe("interpolateConfig", () => {
 
   describe("partial substitution", () => {
     test("multiple vars in one string all resolve", () => {
-      const result = interpolateConfig(
-        { url: "https://${HOST}:${PORT}/api" },
-        { HOST: "localhost", PORT: "3000" },
-      );
-      expect((result.resolved as { url: string }).url).toBe(
-        "https://localhost:3000/api",
-      );
+      const result = interpolateConfig({ url: "https://${HOST}:${PORT}/api" }, { HOST: "localhost", PORT: "3000" });
+      expect((result.resolved as { url: string }).url).toBe("https://localhost:3000/api");
     });
 
     test("template map records full original string", () => {
-      const result = interpolateConfig(
-        { url: "https://${HOST}:${PORT}/api" },
-        { HOST: "localhost", PORT: "3000" },
-      );
-      expect(result.templates.get("url")).toBe(
-        "https://${HOST}:${PORT}/api",
-      );
+      const result = interpolateConfig({ url: "https://${HOST}:${PORT}/api" }, { HOST: "localhost", PORT: "3000" });
+      expect(result.templates.get("url")).toBe("https://${HOST}:${PORT}/api");
     });
   });
 
@@ -242,18 +196,12 @@ describe("interpolateConfig", () => {
 
   describe("template map tracking", () => {
     test("records template for simple var", () => {
-      const result = interpolateConfig(
-        { baseUrl: "${BASE_URL}" },
-        { BASE_URL: "http://localhost" },
-      );
+      const result = interpolateConfig({ baseUrl: "${BASE_URL}" }, { BASE_URL: "http://localhost" });
       expect(result.templates.get("baseUrl")).toBe("${BASE_URL}");
     });
 
     test("does not record template for literal strings", () => {
-      const result = interpolateConfig(
-        { baseUrl: "http://literal.com" },
-        {},
-      );
+      const result = interpolateConfig({ baseUrl: "http://literal.com" }, {});
       expect(result.templates.size).toBe(0);
     });
 

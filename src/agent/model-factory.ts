@@ -63,7 +63,7 @@ export function createModel(modelName: string, providerName: ProviderName) {
       return google(modelName);
     case "openrouter": {
       const openrouter = createOpenRouter({
-        apiKey: Bun.env.OPENROUTER_API_KEY!,
+        apiKey: Bun.env.OPENROUTER_API_KEY ?? "",
       });
       return openrouter.chat(modelName);
     }

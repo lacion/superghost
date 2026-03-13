@@ -3,7 +3,12 @@ import { type Reporter } from "../output/types.ts";
 import { type RunResult, type TestResult } from "./types.ts";
 
 /** Function signature for executing a single test case */
-export type ExecuteFn = (testCase: string, baseUrl: string, testContext?: string, testIndex?: number) => Promise<TestResult>;
+export type ExecuteFn = (
+  testCase: string,
+  baseUrl: string,
+  testContext?: string,
+  testIndex?: number,
+) => Promise<TestResult>;
 
 /**
  * Orchestrates sequential execution of all test cases.

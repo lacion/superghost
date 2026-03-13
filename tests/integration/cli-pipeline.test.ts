@@ -401,10 +401,11 @@ describe("CLI Pipeline Integration", () => {
 
   describe("env var interpolation integration", () => {
     test("${VAR:-default} in config resolves correctly in --dry-run output", async () => {
-      const { exitCode, stderr } = await runCli(
-        ["--config", "tests/fixtures/env-var-config.yaml", "--dry-run"],
-        { BASE_URL: "", API_URL: "https://api.test.com", OPENAI_API_KEY: "fake-key" },
-      );
+      const { exitCode, stderr } = await runCli(["--config", "tests/fixtures/env-var-config.yaml", "--dry-run"], {
+        BASE_URL: "",
+        API_URL: "https://api.test.com",
+        OPENAI_API_KEY: "fake-key",
+      });
       // BASE_URL is empty so ${BASE_URL:-http://localhost:3000} should use default
       expect(exitCode).toBe(0);
       expect(stderr).toContain("(dry-run)");

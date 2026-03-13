@@ -32,8 +32,7 @@ export interface InterpolationResult {
  *   3: modifier (:- or :?)
  *   4: modifier value (default or error message)
  */
-const ENV_VAR_PATTERN =
-  /\$\$\{([^}]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:[-?])([^}]*))?\}/g;
+const ENV_VAR_PATTERN = /\$\$\{([^}]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:[-?])([^}]*))?\}/g;
 
 /**
  * Pattern to detect invalid syntax that the main regex won't match:
@@ -51,10 +50,7 @@ const INVALID_PATTERN = /\$\{(?:\}|(\d)[^}]*\})/;
  */
 export function interpolateConfig(
   obj: unknown,
-  env: Record<string, string | undefined> = process.env as Record<
-    string,
-    string | undefined
-  >,
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
 ): InterpolationResult {
   const templates = new Map<string, string>();
   const errors: string[] = [];
@@ -76,9 +72,7 @@ function deepWalk(
     return interpolateString(value, path, templates, errors, env);
   }
   if (Array.isArray(value)) {
-    return value.map((item, i) =>
-      deepWalk(item, `${path}[${i}]`, templates, errors, env),
-    );
+    return value.map((item, i) => deepWalk(item, `${path}[${i}]`, templates, errors, env));
   }
   if (value !== null && typeof value === "object") {
     const result: Record<string, unknown> = {};
@@ -111,14 +105,20 @@ function interpolateString(
 
   const result = value.replace(
     ENV_VAR_PATTERN,
-    (match, escaped: string | undefined, varName: string | undefined, modifier: string | undefined, modValue: string | undefined) => {
+    (
+      match,
+      escaped: string | undefined,
+      varName: string | undefined,
+      modifier: string | undefined,
+      modValue: string | undefined,
+    ) => {
       // Handle escape: $${VAR} -> ${VAR}
       if (escaped !== undefined) {
         return `\${${escaped}}`;
       }
 
       hasEnvRef = true;
-      const envValue = env[varName!];
+      const envValue = env[varName as string];
 
       // If defined and non-empty, use the env value
       if (envValue !== undefined && envValue !== "") {
@@ -127,7 +127,7 @@ function interpolateString(
 
       // Unset or empty
       if (modifier === ":-") {
-        return modValue!;
+        return modValue ?? "";
       }
       if (modifier === ":?") {
         errors.push(`${varName}: ${modValue}`);

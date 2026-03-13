@@ -25,9 +25,7 @@ export class ConfigLoadError extends Error {
  * @returns Object with validated Config and template map for interpolated fields
  * @throws ConfigLoadError if file is missing, malformed, or fails validation
  */
-export async function loadConfig(
-  filePath: string,
-): Promise<{ config: Config; templates: Map<string, string> }> {
+export async function loadConfig(filePath: string): Promise<{ config: Config; templates: Map<string, string> }> {
   // Layer 1: Read file (produces actionable error if missing)
   const file = Bun.file(filePath);
   let content: string;
@@ -59,13 +57,9 @@ export async function loadConfig(
   // Layer 2.5: Env var interpolation (post-YAML-parse, pre-Zod-validate)
   const interpolation = interpolateConfig(raw);
   if (interpolation.errors.length > 0) {
-    const issues = interpolation.errors
-      .map((err, i) => `  ${i + 1}. ${err}`)
-      .join("\n");
+    const issues = interpolation.errors.map((err, i) => `  ${i + 1}. ${err}`).join("\n");
     const count = interpolation.errors.length;
-    throw new ConfigLoadError(
-      `Missing env vars (${count} issue${count > 1 ? "s" : ""})\n${issues}`,
-    );
+    throw new ConfigLoadError(`Missing env vars (${count} issue${count > 1 ? "s" : ""})\n${issues}`);
   }
 
   // Layer 3: Zod validation
