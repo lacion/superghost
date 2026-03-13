@@ -1,5 +1,24 @@
 # Milestones
 
+## v0.4 CI/CD + Team Readiness (Part 2) (Shipped: 2026-03-13)
+
+**Phases completed:** 4 phases, 5 plans, 10 tasks | 14 min total execution
+**Timeline:** 2026-03-11 → 2026-03-13
+
+**Key accomplishments:**
+- JUnit XML output (`--output junit`) with classname, time-in-seconds, and per-testcase properties metadata for CI dashboards
+- Env var interpolation (`${VAR}`, `${VAR:-default}`, `${VAR:?error}`) in YAML configs with cache secret prevention
+- GitHub Actions CI workflow with parallel lint/typecheck/test gates and single `gate` aggregator for branch protection
+- Contributor docs: CONTRIBUTING.md, SECURITY.md, YAML form issue templates, PR template with CI-matching checklist
+
+**Phases:**
+- Phase 14: JUnit XML Output — escapeXml, ANSI stripping, 3-function formatter mirroring JSON pattern, 37 unit tests
+- Phase 15: Env Var Interpolation — regex-based interpolation engine, post-parse architecture, template-aware cache hashing
+- Phase 16: GitHub Actions PR Workflow — ci.yml with draft filtering, concurrency cancellation, frozen-lockfile installs
+- Phase 17: Contributor Docs — CONTRIBUTING.md with architecture map, SECURITY.md with GitHub Advisory policy, issue/PR templates
+
+---
+
 ## v0.2 DX Polish + Reliability Hardening (Shipped: 2026-03-12)
 
 **Phases completed:** 4 phases, 7 plans | 23 min total execution

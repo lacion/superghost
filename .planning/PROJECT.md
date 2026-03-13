@@ -2,7 +2,7 @@
 
 ## What This Is
 
-SuperGhost is an AI-powered end-to-end browser and API testing CLI tool for AI-native teams. Users write test cases in plain English via YAML config, and an AI agent executes them in a real browser (via Playwright MCP) or via HTTP calls. Successful test steps are cached for instant deterministic replay on subsequent runs, making AI-driven testing viable for CI/CD pipelines.
+SuperGhost is an AI-powered end-to-end browser and API testing CLI tool for AI-native teams. Users write test cases in plain English via YAML config, and an AI agent executes them in a real browser (via Playwright MCP) or via HTTP calls. Successful test steps are cached for instant deterministic replay on subsequent runs, making AI-driven testing viable for CI/CD pipelines. Supports JUnit XML and JSON output for CI reporting, env var interpolation for secret injection, and ships with GitHub Actions CI gates and full contributor onboarding docs.
 
 ## Core Value
 
@@ -31,14 +31,14 @@ Plain English test cases that execute in a real browser, with step caching that 
 - ✓ Linting/formatting enforcement with Biome — v0.3
 - ✓ JSON output format (`--output json`) for programmatic consumption — v0.3
 - ✓ AI-generated release notes in GitHub release workflow — v0.3
+- ✓ JUnit XML output format (`--output junit`) for CI reporting — v0.4
+- ✓ Env var interpolation in YAML configs (`${VAR}`, `${VAR:-default}`, `${VAR:?error}`) — v0.4
+- ✓ GitHub Actions PR workflow with parallel lint/typecheck/test gates — v0.4
+- ✓ Contributor docs: CONTRIBUTING.md, SECURITY.md, issue/PR templates — v0.4
 
 ### Active
 
-<!-- v0.4: CI/CD + Team Readiness (continued) -->
-- [ ] JUnit XML output format (`--output junit`) for CI reporting
-- [ ] Env var interpolation in YAML configs (`${VAR}` syntax)
-- [ ] PR workflow with test gates (GitHub Actions)
-- [ ] Contributor docs (CONTRIBUTING.md, issue/PR templates, SECURITY.md)
+(No active milestone — next milestone TBD)
 
 ### Out of Scope
 
@@ -48,28 +48,22 @@ Plain English test cases that execute in a real browser, with step caching that 
 - Test generation from app crawling — users write test cases
 - Cloud-hosted execution — local/CI runner only
 - Offline mode — real-time AI execution is core value
-
-## Current Milestone: v0.4 CI/CD + Team Readiness (Part 2)
-
-**Goal:** Complete team-readiness features — JUnit XML for CI reporting, env var interpolation for CI-safe configs, PR workflow gates, and contributor onboarding docs.
-
-**Target features:**
-- JUnit XML output format for CI reporting
-- Env var interpolation in YAML configs
-- GitHub Actions PR workflow with test gates
-- Contributor docs (CONTRIBUTING.md, SECURITY.md, issue/PR templates)
+- `.env` file auto-loading — ambiguous env precedence; users should set env vars explicitly
+- Recursive env var expansion — unnecessary complexity; `${VAR}` referencing other vars is an anti-pattern
 
 ## Context
 
-Shipped v1.0 with 3,787 LOC TypeScript across 93 files.
-Tech stack: Bun, Vercel AI SDK, Playwright MCP, Commander.js, Zod, YAML.
-Built in 1 day (2026-03-10 → 2026-03-11), 3 phases, 9 plans, 63 commits.
+Shipped v0.4 with 6,813 LOC TypeScript across 23+ files modified this milestone.
+Tech stack: Bun, Vercel AI SDK, Playwright MCP, Commander.js, Zod, YAML, Biome.
+Four milestones shipped in 3 days (2026-03-10 → 2026-03-13): v1.0 MVP, v0.2 DX Polish, v0.3 CI/CD, v0.4 CI/CD Part 2.
 
 Known areas for future work:
 - Parallel test execution for faster suite runs
 - Watch mode for re-running on config file changes
-- JSON/JUnit output formats for CI reporting
+- Config composition (extends/inherits)
+- Fail-fast (`--bail`) mode
 - Cost/token tracking per test run
+- HTML report generation (via Allure consuming JUnit XML)
 
 ## Constraints
 
@@ -79,6 +73,7 @@ Known areas for future work:
 - **Browser**: Playwright MCP for browser automation (not direct Playwright API)
 - **Config**: YAML parsed with `yaml` package, validated with Zod
 - **Providers**: Must support Anthropic, OpenAI, Google Gemini, and OpenRouter
+- **Linting**: Biome — single tool for lint, format, import sorting
 
 ## Key Decisions
 
@@ -93,6 +88,10 @@ Known areas for future work:
 | StdioClientTransport for MCP | Bun-compatible (not Experimental_StdioMCPTransport) | ✓ Good — stable API from @modelcontextprotocol/sdk |
 | Provider inference from model name | Auto-detect provider without explicit config | ✓ Good — regex-based, anthropic default fallback |
 | BUN_BE_BUN=1 for standalone deps | Forces bun behavior in compiled binary | ✓ Good — auto-install MCP deps on first run |
+| Template literal XML for JUnit | Zero dependencies, matches project pattern | ✓ Good — v0.4 |
+| Post-YAML-parse env var interpolation | YAML-special chars in env values can't break parsing | ✓ Good — v0.4 |
+| GitHub Security Advisory over email | Private, tracked, auto-assigned CVE; better than email for OSS | ✓ Good — v0.4 |
+| Gate job aggregator pattern | Single status check name for branch protection; avoids check name fragility | ✓ Good — v0.4 |
 
 ---
-*Last updated: 2026-03-12 after v0.4 milestone start*
+*Last updated: 2026-03-13 after v0.4 milestone completion*
