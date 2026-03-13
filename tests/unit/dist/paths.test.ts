@@ -49,7 +49,7 @@ describe("paths", () => {
       const cmd = getMcpCommand("@playwright/mcp", false);
       expect(cmd).toEqual({
         command: "bunx",
-        args: ["@playwright/mcp@latest"],
+        args: ["@playwright/mcp"],
       });
     });
 
@@ -75,7 +75,7 @@ describe("paths", () => {
       const cmd = getMcpCommand("some-tool", false);
       expect(cmd).toEqual({
         command: "bunx",
-        args: ["some-tool@latest"],
+        args: ["some-tool"],
       });
     });
   });

@@ -221,6 +221,21 @@ describe("CacheManager", () => {
     });
   });
 
+  describe("hashKey edge cases", () => {
+    test("handles empty test case string without crashing", () => {
+      const hash = CacheManager.hashKey("", baseUrl);
+      expect(hash).toMatch(/^[a-f0-9]{16}$/);
+    });
+
+    test("produces consistent results for URLs with query params", () => {
+      const urlWithQuery = "http://localhost:3000/api?token=abc&page=1";
+      const hash1 = CacheManager.hashKey(testCase, urlWithQuery);
+      const hash2 = CacheManager.hashKey(testCase, urlWithQuery);
+      expect(hash1).toBe(hash2);
+      expect(hash1).toMatch(/^[a-f0-9]{16}$/);
+    });
+  });
+
   describe("hashKey with templates", () => {
     test("with template params produces different hash than without", () => {
       const hashWithout = CacheManager.hashKey(testCase, baseUrl);

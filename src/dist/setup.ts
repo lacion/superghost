@@ -1,7 +1,8 @@
 import { join } from "node:path";
+import { unlink } from "node:fs/promises";
 import { createSpinner } from "nanospinner";
 import pc from "picocolors";
-import { SUPERGHOST_HOME, MCP_NODE_MODULES } from "./paths.ts";
+import { SUPERGHOST_HOME, MCP_NODE_MODULES, isStandaloneBinary } from "./paths.ts";
 
 /** MCP server dependencies that standalone binaries need */
 const MCP_DEPS: Record<string, string> = {
@@ -62,5 +63,49 @@ export async function ensureMcpDependencies(): Promise<void> {
 
   spinner.success({
     text: pc.green("MCP dependencies installed to ~/.superghost/"),
+  });
+}
+
+/** MCP packages used in npm mode */
+const MCP_PACKAGES = ["@playwright/mcp", "@calibress/curl-mcp"];
+
+/**
+ * Update MCP server dependencies to latest versions.
+ *
+ * - Standalone mode: deletes marker file and re-installs via ensureMcpDependencies().
+ * - npm mode: runs `bunx <pkg>@latest --help` to prime Bun's cache with the latest version.
+ */
+export async function updateMcpDependencies(): Promise<void> {
+  if (isStandaloneBinary()) {
+    const markerPath = join(
+      MCP_NODE_MODULES,
+      "@playwright",
+      "mcp",
+      "package.json",
+    );
+    await unlink(markerPath).catch(() => {});
+    await ensureMcpDependencies();
+    return;
+  }
+
+  // npm mode: re-prime Bun cache with @latest
+  const spinner = createSpinner(
+    pc.cyan("Updating MCP dependencies..."),
+  ).start();
+
+  for (const pkg of MCP_PACKAGES) {
+    const proc = Bun.spawn(["bunx", `${pkg}@latest`, "--help"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      spinner.error({ text: pc.red(`Failed to update ${pkg}`) });
+      process.exit(1);
+    }
+  }
+
+  spinner.success({
+    text: pc.green("MCP dependencies updated to latest"),
   });
 }

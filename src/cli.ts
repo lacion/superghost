@@ -12,7 +12,7 @@ import { CacheManager } from "./cache/cache-manager.ts";
 import { StepReplayer, type ToolExecutor } from "./cache/step-replayer.ts";
 import { ConfigLoadError, loadConfig } from "./config/loader.ts";
 import { isStandaloneBinary } from "./dist/paths.ts";
-import { ensureMcpDependencies } from "./dist/setup.ts";
+import { ensureMcpDependencies, updateMcpDependencies } from "./dist/setup.ts";
 import { checkBaseUrlReachable } from "./infra/preflight.ts";
 import { ProcessManager } from "./infra/process-manager.ts";
 import { setupSignalHandlers } from "./infra/signals.ts";
@@ -64,6 +64,7 @@ program
   .option("--dry-run", "List tests and validate config without executing")
   .option("--verbose", "Show per-step tool call output during execution")
   .option("--output <format>", "Output format (json, junit)")
+  .option("--update-mcp", "Update MCP server dependencies to latest versions")
   .exitOverride((err) => {
     // Commander writes its own error message to stderr.
     // Re-exit with code 2 for config-class errors (missing required option, unknown option).
@@ -321,5 +322,10 @@ program
   );
 
 (async () => {
+  // Handle --update-mcp before Commander parses (bypasses --config requirement)
+  if (process.argv.includes("--update-mcp")) {
+    await updateMcpDependencies();
+    process.exit(0);
+  }
   await program.parseAsync();
 })();

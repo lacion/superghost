@@ -91,11 +91,12 @@ describe("CLI Pipeline Integration", () => {
     expect(stderr).toContain("Dashboard Load");
   });
 
-  test("--help shows --only and --no-cache options", async () => {
+  test("--help shows --only, --no-cache, and --update-mcp options", async () => {
     const { exitCode, stderr } = await runCli(["--help"]);
     expect(exitCode).toBe(0);
     expect(stderr).toContain("--only");
     expect(stderr).toContain("--no-cache");
+    expect(stderr).toContain("--update-mcp");
   });
 
   test("unreachable baseUrl exits 2 with error message", async () => {
@@ -370,6 +371,43 @@ describe("CLI Pipeline Integration", () => {
       // Human-readable output continues on stderr
       expect(stderr).toContain("Login Flow");
       expect(stderr).toContain("Dashboard Load");
+    });
+  });
+
+  describe("output junit", () => {
+    test("--output junit --dry-run produces valid JUnit XML on stdout", async () => {
+      const { exitCode, stdout } = await runCli(
+        ["--config", "tests/fixtures/multi-test-config.yaml", "--output", "junit", "--dry-run"],
+        { OPENAI_API_KEY: "fake-key" },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toStartWith('<?xml version="1.0" encoding="UTF-8"?>');
+      expect(stdout).toContain("<testsuite");
+      expect(stdout).toContain("<testcase");
+      expect(stdout).toContain("<skipped/>");
+      expect(stdout).toContain("</testsuite>");
+    });
+
+    test("--output junit with missing API key emits error XML (not plain text)", async () => {
+      const { exitCode, stdout } = await runCli(["--config", "tests/fixtures/valid-config.yaml", "--output", "junit"], {
+        OPENAI_API_KEY: "",
+      });
+      expect(exitCode).toBe(2);
+      expect(stdout).toStartWith('<?xml version="1.0" encoding="UTF-8"?>');
+      expect(stdout).toContain("<error");
+      expect(stdout).toContain("Missing API key");
+    });
+  });
+
+  describe("env var interpolation integration", () => {
+    test("${VAR:-default} in config resolves correctly in --dry-run output", async () => {
+      const { exitCode, stderr } = await runCli(
+        ["--config", "tests/fixtures/env-var-config.yaml", "--dry-run"],
+        { BASE_URL: "", API_URL: "https://api.test.com", OPENAI_API_KEY: "fake-key" },
+      );
+      // BASE_URL is empty so ${BASE_URL:-http://localhost:3000} should use default
+      expect(exitCode).toBe(0);
+      expect(stderr).toContain("(dry-run)");
     });
   });
 

@@ -14,6 +14,13 @@ Write tests in YAML. An AI agent executes them in a real browser or via API call
 bunx superghost --config tests.yaml
 ```
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install lacion/tap/superghost
+superghost --config tests.yaml
+```
+
 ### Global install
 
 ```bash

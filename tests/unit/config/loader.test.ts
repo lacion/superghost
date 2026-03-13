@@ -81,6 +81,55 @@ describe("loadConfig", () => {
   });
 });
 
+describe("loadConfig edge cases", () => {
+  test("empty config file throws ConfigLoadError", async () => {
+    const { mkdtemp, writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "sg-empty-config-"));
+    const emptyConfig = join(tmpDir, "empty.yaml");
+    await writeFile(emptyConfig, "");
+
+    try {
+      await loadConfig(emptyConfig);
+      expect(true).toBe(false); // should not reach here
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigLoadError);
+    }
+  });
+
+  test("config with only YAML comments throws ConfigLoadError", async () => {
+    const { mkdtemp, writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "sg-comment-config-"));
+    const commentConfig = join(tmpDir, "comments.yaml");
+    await writeFile(commentConfig, "# This is just a comment\n# Another comment\n");
+
+    try {
+      await loadConfig(commentConfig);
+      expect(true).toBe(false); // should not reach here
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigLoadError);
+    }
+  });
+
+  test("missing-fields.yaml error contains field paths", async () => {
+    try {
+      await loadConfig(join(fixturesDir, "missing-fields.yaml"));
+      expect(true).toBe(false); // should not reach here
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigLoadError);
+      const err = error as ConfigLoadError;
+      // Should contain numbered issues with field paths (e.g., "tests")
+      expect(err.message).toContain("Invalid config");
+      expect(err.message).toMatch(/\d+\.\s+\S+/); // numbered issue with field path
+    }
+  });
+});
+
 describe("loadConfig env var interpolation", () => {
   const savedEnv: Record<string, string | undefined> = {};
 

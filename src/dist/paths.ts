@@ -22,7 +22,7 @@ export function isStandaloneBinary(): boolean {
 
 /**
  * Get spawn command for an MCP server package.
- * In npm mode, uses bunx with @latest tag.
+ * In npm mode, uses bunx (cached after first download).
  * In standalone mode, uses installed path from ~/.superghost/node_modules/.bin/.
  *
  * @param packageName - Full package name (e.g., "@playwright/mcp")
@@ -44,9 +44,9 @@ export function getMcpCommand(
     };
   }
 
-  // npm package: use bunx with @latest tag
+  // npm package: use bunx (cached after first run)
   return {
     command: "bunx",
-    args: [`${packageName}@latest`],
+    args: [packageName],
   };
 }
