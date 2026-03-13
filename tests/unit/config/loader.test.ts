@@ -7,7 +7,7 @@ const fixturesDir = join(import.meta.dir, "../../fixtures");
 
 describe("loadConfig", () => {
   test("loads and returns valid config from valid-config.yaml", async () => {
-    const config = await loadConfig(join(fixturesDir, "valid-config.yaml"));
+    const { config } = await loadConfig(join(fixturesDir, "valid-config.yaml"));
 
     expect(config.baseUrl).toBe("https://example.com");
     expect(config.browser).toBe("firefox");

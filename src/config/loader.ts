@@ -1,5 +1,6 @@
 import { YAML } from "bun";
 
+import { interpolateConfig } from "./interpolate.ts";
 import { ConfigSchema } from "./schema.ts";
 import { type Config } from "./types.ts";
 
@@ -21,10 +22,12 @@ export class ConfigLoadError extends Error {
  * 3. Zod validation (all issues numbered with field paths)
  *
  * @param filePath - Absolute or relative path to the YAML config
- * @returns Validated Config object with defaults applied
+ * @returns Object with validated Config and template map for interpolated fields
  * @throws ConfigLoadError if file is missing, malformed, or fails validation
  */
-export async function loadConfig(filePath: string): Promise<Config> {
+export async function loadConfig(
+  filePath: string,
+): Promise<{ config: Config; templates: Map<string, string> }> {
   // Layer 1: Read file (produces actionable error if missing)
   const file = Bun.file(filePath);
   let content: string;
@@ -53,9 +56,21 @@ export async function loadConfig(filePath: string): Promise<Config> {
     throw new ConfigLoadError(`Invalid YAML syntax: ${error instanceof Error ? error.message : String(error)}`, error);
   }
 
+  // Layer 2.5: Env var interpolation (post-YAML-parse, pre-Zod-validate)
+  const interpolation = interpolateConfig(raw);
+  if (interpolation.errors.length > 0) {
+    const issues = interpolation.errors
+      .map((err, i) => `  ${i + 1}. ${err}`)
+      .join("\n");
+    const count = interpolation.errors.length;
+    throw new ConfigLoadError(
+      `Missing env vars (${count} issue${count > 1 ? "s" : ""})\n${issues}`,
+    );
+  }
+
   // Layer 3: Zod validation
   // IMPORTANT: Check result.success boolean, NOT instanceof Error (Zod v4 pitfall)
-  const result = ConfigSchema.safeParse(raw);
+  const result = ConfigSchema.safeParse(interpolation.resolved);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue, i) => `  ${i + 1}. ${issue.path.join(".")}: ${issue.message}`)
@@ -64,5 +79,5 @@ export async function loadConfig(filePath: string): Promise<Config> {
     throw new ConfigLoadError(`Invalid config (${count} issue${count > 1 ? "s" : ""})\n${issues}`);
   }
 
-  return result.data;
+  return { config: result.data, templates: interpolation.templates };
 }

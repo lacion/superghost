@@ -24,7 +24,7 @@ export class CacheManager {
    * 2. URL normalization (lowercase hostname, strip trailing slash)
    * 3. Version-prefixed input string ("v2|...")
    */
-  static hashKey(testCase: string, baseUrl: string): string {
+  static hashKey(testCase: string, baseUrl: string, templateTestCase?: string, templateBaseUrl?: string): string {
     // Step 1: Unicode NFC + whitespace collapse (case-preserving per user decision)
     const normalizedCase = testCase.normalize("NFC").replace(/\s+/g, " ").trim();
 
@@ -40,8 +40,10 @@ export class CacheManager {
       normalizedUrl = baseUrl.replace(/\/+$/, "").toLowerCase();
     }
 
-    // Step 3: Version-prefixed input
-    const input = `v2|${normalizedCase}|${normalizedUrl}`;
+    // Step 3: Version-prefixed input (includes template forms when provided for cache invalidation)
+    const input = templateTestCase
+      ? `v2|${templateTestCase}|${normalizedCase}|${templateBaseUrl ?? ""}|${normalizedUrl}`
+      : `v2|${normalizedCase}|${normalizedUrl}`;
     const hasher = new Bun.CryptoHasher("sha256");
     hasher.update(input);
     return hasher.digest("hex").slice(0, 16);
@@ -64,19 +66,32 @@ export class CacheManager {
       aiMessage: string;
       durationMs: number;
     },
+    templates?: Map<string, string>,
+    testIndex?: number,
   ): Promise<void> {
     await mkdir(this.cacheDir, { recursive: true });
 
-    const hash = CacheManager.hashKey(testCase, baseUrl);
+    // Determine template forms for cache storage
+    const templateTestCase = testIndex !== undefined ? templates?.get(`tests[${testIndex}].case`) : undefined;
+    const templateBaseUrl =
+      testIndex !== undefined
+        ? (templates?.get(`tests[${testIndex}].baseUrl`) ?? templates?.get("baseUrl"))
+        : templates?.get("baseUrl");
+
+    const hash = CacheManager.hashKey(testCase, baseUrl, templateTestCase, templateBaseUrl);
     const now = new Date().toISOString();
 
     // Load existing entry to preserve createdAt
-    const existing = await this.load(testCase, baseUrl);
+    const existing = await this.loadByHash(hash);
+
+    // Store template form instead of resolved secrets for interpolated fields
+    const storedTestCase = templateTestCase ?? testCase;
+    const storedBaseUrl = templateBaseUrl ?? baseUrl;
 
     const entry: CacheEntry = {
       version: 2,
-      testCase,
-      baseUrl,
+      testCase: storedTestCase,
+      baseUrl: storedBaseUrl,
       steps,
       model: diagnostics.model,
       provider: diagnostics.provider,
@@ -93,6 +108,16 @@ export class CacheManager {
     // Atomic write: write to tmp file, then rename
     await Bun.write(tmpPath, JSON.stringify(entry, null, 2));
     await rename(tmpPath, filePath);
+  }
+
+  /** Load a cache entry by pre-computed hash key */
+  private async loadByHash(hash: string): Promise<CacheEntry | null> {
+    const filePath = join(this.cacheDir, `${hash}.json`);
+    try {
+      return (await Bun.file(filePath).json()) as CacheEntry;
+    } catch {
+      return null;
+    }
   }
 
   /**
